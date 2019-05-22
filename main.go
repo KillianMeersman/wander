@@ -2,36 +2,45 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/KillianMeersman/wander/spider"
 	"github.com/PuerkitoBio/goquery"
 )
 
 func main() {
-	spid := spider.NewSpider()
+	spid, err := spider.NewSpider([]string{"bol\\.com"}, 5)
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	spid.Parse(func(res *spider.Response) {
+		log.Printf("Received response from %s\n", res.Request.URL)
 		res.Find("a[href]").Each(func(i int, sel *goquery.Selection) {
 			link, ok := sel.Attr("href")
 			if ok {
-				spid.Visit(link)
+				spid.Follow(link, res)
 			}
 		})
-
-		fmt.Printf("Received response from %s\n", res.Request.URL)
 	})
 
 	spid.OnError(func(err error) {
-		fmt.Println(err)
+		log.Printf("Error: %s\n", err)
 	})
 
 	spid.OnRequest(func(path string) {
-		fmt.Printf("Visiting %s\n", path)
+		log.Printf("Visiting %s\n", path)
 	})
+
+	throttle, err := spider.NewThrottle(".*", 100*time.Millisecond)
+	if err != nil {
+		log.Fatal(err)
+	}
+	spid.Throttle(throttle)
 
 	spid.Visit("http://bol.com")
 	spid.Visit("http://reddit.com")
@@ -46,5 +55,4 @@ func main() {
 	}()
 
 	spid.Run(ctx)
-	<-ctx.Done()
 }
