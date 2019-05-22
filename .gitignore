@@ -1,0 +1,9 @@
+# folders
+vendor/
+.vscode/
+
+# files
+*.lock
+
+# build files
+main
