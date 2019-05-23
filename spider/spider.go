@@ -15,10 +15,11 @@ type ErrorFunc func(err error)
 
 // Spider with callbacks
 type Spider struct {
-	cache          sync.Map
-	queue          chan *Request
-	allowedDomains []*regexp.Regexp
-	throttles      []*Throttle
+	cache           sync.Map
+	queue           chan *Request
+	allowedDomains  []*regexp.Regexp
+	throttle        *Throttle
+	domainThrottles []*DomainThrottle
 
 	threadn     int
 	parseFunc   ParseFunc
@@ -37,11 +38,12 @@ func NewSpider(allowedDomains []string, threadn int) (*Spider, error) {
 	}
 
 	return &Spider{
-		cache:          sync.Map{},
-		queue:          make(chan *Request, 100),
-		threadn:        threadn,
-		allowedDomains: allowedRegexs,
-		throttles:      make([]*Throttle, 0),
+		cache:           sync.Map{},
+		queue:           make(chan *Request, 100),
+		threadn:         threadn,
+		allowedDomains:  allowedRegexs,
+		throttle:        nil,
+		domainThrottles: make([]*DomainThrottle, 0),
 
 		parseFunc:   func(response *Response) {},
 		requestFunc: func(path string) {},
@@ -93,9 +95,13 @@ func (s *Spider) Follow(path string, res *Response) {
 	}
 }
 
-func (s *Spider) Throttle(throttles ...*Throttle) {
+func (s *Spider) Throttle(throttle *Throttle) {
+	s.throttle = throttle
+}
+
+func (s *Spider) DomainThrottle(throttles ...*DomainThrottle) {
 	for _, throttle := range throttles {
-		s.throttles = append(s.throttles, throttle)
+		s.domainThrottles = append(s.domainThrottles, throttle)
 	}
 }
 
@@ -107,39 +113,57 @@ func (s *Spider) Run(ctx context.Context) {
 		go func() {
 			for {
 				select {
-				case request := <-s.queue:
-					for _, domain := range s.allowedDomains {
-						if domain.MatchString(request.Hostname()) {
-							goto allowed
-						}
-					}
-					s.errFunc(errors.New(fmt.Sprintf("domain %s filtered", request.String())))
-					continue
-
-				allowed:
-					for _, throttle := range s.throttles {
-						if throttle.Applies(request.String()) {
-							throttle.Wait()
-						}
-					}
-
-					go s.requestFunc(request.String())
-					res, err := http.Get(request.String())
-					if err != nil {
-						go s.errFunc(err)
-						continue
-					}
-					doc, err := NewResponse(request, res)
-					if err != nil {
-						go s.errFunc(err)
-					}
-					go s.parseFunc(doc)
 				case <-ctx.Done():
 					wg.Done()
 					return
+
+				case request := <-s.queue:
+					if s.filterDomains(request) {
+						s.waitThrottle(request)
+						s.getResponse(request)
+						continue
+					}
+					s.errFunc(errors.New(fmt.Sprintf("domain %s filtered", request.String())))
 				}
 			}
 		}()
 	}
 	wg.Wait()
+}
+
+func (s *Spider) filterDomains(request *Request) bool {
+	for _, domain := range s.allowedDomains {
+		if domain.MatchString(request.Hostname()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Spider) waitThrottle(request *Request) {
+	for _, throttle := range s.domainThrottles {
+		if throttle.Applies(request.String()) {
+			throttle.Wait()
+			return
+		}
+	}
+	if s.throttle != nil {
+		s.throttle.Wait()
+		return
+	}
+}
+
+func (s *Spider) getResponse(request *Request) {
+	go s.requestFunc(request.String())
+	res, err := http.Get(request.String())
+	if err != nil {
+		go s.errFunc(err)
+		return
+	}
+	doc, err := NewResponse(request, res)
+	if err != nil {
+		go s.errFunc(err)
+		return
+	}
+	go s.parseFunc(doc)
 }

@@ -5,31 +5,51 @@ import (
 	"time"
 )
 
-type Throttle struct {
+type DomainThrottle struct {
+	*Throttle
 	domain *regexp.Regexp
-	delay  time.Duration
-	ticker *time.Ticker
 }
 
-func NewThrottle(domain string, delay time.Duration) (*Throttle, error) {
+// Applies returns true if the path matches the Throttle domain regex
+func (t *DomainThrottle) Applies(path string) bool {
+	return t.domain.MatchString(path)
+}
+
+func NewDomainThrottle(domain string, delay time.Duration) (*DomainThrottle, error) {
 	regex, err := regexp.Compile(domain)
 	if err != nil {
 		return nil, err
 	}
+	throttle, err := NewThrottle(delay)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DomainThrottle{
+		throttle,
+		regex,
+	}, nil
+}
+
+type Throttle struct {
+	delay  time.Duration
+	ticker *time.Ticker
+}
+
+func NewThrottle(delay time.Duration) (*Throttle, error) {
 
 	return &Throttle{
-		regex,
 		delay,
 		time.NewTicker(delay),
 	}, nil
 }
 
-// Applies returns true if the path matches the Throttle domain regex
-func (t *Throttle) Applies(path string) bool {
-	return t.domain.MatchString(path)
-}
-
 // Wait until the throttle delay has passed
 func (t *Throttle) Wait() {
 	<-t.ticker.C
+}
+
+// Ticker channel
+func (t *Throttle) Ticker() <-chan time.Time {
+	return t.ticker.C
 }

@@ -36,11 +36,13 @@ func main() {
 		log.Printf("Visiting %s\n", path)
 	})
 
-	throttle, err := spider.NewThrottle(".*", 100*time.Millisecond)
+	globalThrottle, err := spider.NewThrottle(3 * time.Second)
+	bolThrottle, err := spider.NewDomainThrottle("bol\\.com", 1*time.Second)
 	if err != nil {
 		log.Fatal(err)
 	}
-	spid.Throttle(throttle)
+	spid.Throttle(globalThrottle)
+	spid.DomainThrottle(bolThrottle)
 
 	spid.Visit("http://bol.com")
 	spid.Visit("http://reddit.com")
@@ -51,6 +53,7 @@ func main() {
 	signal.Notify(sigintc, os.Interrupt)
 	go func() {
 		<-sigintc
+		log.Println("cancelling...")
 		cancel()
 	}()
 
