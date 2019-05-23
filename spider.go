@@ -28,27 +28,23 @@ type Spider struct {
 }
 
 func NewSpider(allowedDomains []string, threadn int) (*Spider, error) {
-	allowedRegexs := make([]*regexp.Regexp, len(allowedDomains))
-	for i, path := range allowedDomains {
-		allowed, err := regexp.Compile(path)
-		if err != nil {
-			return nil, err
-		}
-		allowedRegexs[i] = allowed
-	}
-
-	return &Spider{
+	spider := &Spider{
 		cache:           sync.Map{},
 		queue:           make(chan *Request, 100),
 		threadn:         threadn,
-		allowedDomains:  allowedRegexs,
 		throttle:        nil,
 		domainThrottles: make([]*DomainThrottle, 0),
 
 		responseFunc: func(res *Response) {},
 		requestFunc:  func(req *Request) {},
 		errFunc:      func(err error) {},
-	}, nil
+	}
+	err := spider.AllowedDomains(allowedDomains...)
+	if err != nil {
+		return nil, err
+	}
+
+	return spider, nil
 }
 
 // OnResponse is called when a response has been received and tokenized
@@ -105,6 +101,20 @@ func (s *Spider) ThrottleDomains(throttles ...*DomainThrottle) {
 	for _, throttle := range throttles {
 		s.domainThrottles = append(s.domainThrottles, throttle)
 	}
+}
+
+// AllowedDomains sets the allowed domains for this spider
+func (s *Spider) AllowedDomains(paths ...string) error {
+	regexs := make([]*regexp.Regexp, len(paths))
+	for i, path := range paths {
+		regex, err := regexp.Compile(path)
+		if err != nil {
+			return err
+		}
+		regexs[i] = regex
+	}
+	s.allowedDomains = regexs
+	return nil
 }
 
 // Run the spider, blocks while the spider is running
