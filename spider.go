@@ -1,4 +1,4 @@
-package spider
+package wander
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"sync"
 )
 
-type ParseFunc func(response *Response)
-type RequestFunc func(path string)
+type RequestFunc func(req *Request)
+type ResponseFunc func(res *Response)
 type ErrorFunc func(err error)
 
 // Spider with callbacks
@@ -20,11 +20,11 @@ type Spider struct {
 	allowedDomains  []*regexp.Regexp
 	throttle        *Throttle
 	domainThrottles []*DomainThrottle
+	threadn         int
 
-	threadn     int
-	parseFunc   ParseFunc
-	requestFunc RequestFunc
-	errFunc     ErrorFunc
+	requestFunc  RequestFunc
+	responseFunc ResponseFunc
+	errFunc      ErrorFunc
 }
 
 func NewSpider(allowedDomains []string, threadn int) (*Spider, error) {
@@ -45,15 +45,15 @@ func NewSpider(allowedDomains []string, threadn int) (*Spider, error) {
 		throttle:        nil,
 		domainThrottles: make([]*DomainThrottle, 0),
 
-		parseFunc:   func(response *Response) {},
-		requestFunc: func(path string) {},
-		errFunc:     func(err error) {},
+		responseFunc: func(res *Response) {},
+		requestFunc:  func(req *Request) {},
+		errFunc:      func(err error) {},
 	}, nil
 }
 
-// Parse a page
-func (s *Spider) Parse(pfunc ParseFunc) {
-	s.parseFunc = pfunc
+// OnResponse is called when a response has been received and tokenized
+func (s *Spider) OnResponse(pfunc ResponseFunc) {
+	s.responseFunc = pfunc
 }
 
 // OnError is called on errors
@@ -95,11 +95,13 @@ func (s *Spider) Follow(path string, res *Response) {
 	}
 }
 
+// Throttle the spider, can be override on a per domain basis via ThrottleDomains
 func (s *Spider) Throttle(throttle *Throttle) {
 	s.throttle = throttle
 }
 
-func (s *Spider) DomainThrottle(throttles ...*DomainThrottle) {
+// ThrottleDomains throttles specific domains, it will override the spider throttle for those domains
+func (s *Spider) ThrottleDomains(throttles ...*DomainThrottle) {
 	for _, throttle := range throttles {
 		s.domainThrottles = append(s.domainThrottles, throttle)
 	}
@@ -142,7 +144,7 @@ func (s *Spider) filterDomains(request *Request) bool {
 
 func (s *Spider) waitThrottle(request *Request) {
 	for _, throttle := range s.domainThrottles {
-		if throttle.Applies(request.String()) {
+		if throttle.Applies(request.Hostname()) {
 			throttle.Wait()
 			return
 		}
@@ -154,7 +156,7 @@ func (s *Spider) waitThrottle(request *Request) {
 }
 
 func (s *Spider) getResponse(request *Request) {
-	go s.requestFunc(request.String())
+	go s.requestFunc(request)
 	res, err := http.Get(request.String())
 	if err != nil {
 		go s.errFunc(err)
@@ -165,5 +167,5 @@ func (s *Spider) getResponse(request *Request) {
 		go s.errFunc(err)
 		return
 	}
-	go s.parseFunc(doc)
+	go s.responseFunc(doc)
 }

@@ -1,4 +1,4 @@
-package spider
+package wander
 
 import (
 	"net/http"
@@ -6,6 +6,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+// Response is a wrapper around http.Response as well as an already parsed Goquery document
 type Response struct {
 	Request *Request
 	*http.Response

@@ -1,10 +1,11 @@
-package spider
+package wander
 
 import (
 	"net/url"
 	"strings"
 )
 
+// Request contains the to-be-visited URL as well as the origin domain, it will automatically convert relative URL's to absolute ones
 type Request struct {
 	*url.URL
 	sourceHost string

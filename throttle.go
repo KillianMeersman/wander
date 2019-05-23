@@ -1,4 +1,4 @@
-package spider
+package wander
 
 import (
 	"regexp"
@@ -37,7 +37,6 @@ type Throttle struct {
 }
 
 func NewThrottle(delay time.Duration) (*Throttle, error) {
-
 	return &Throttle{
 		delay,
 		time.NewTicker(delay),
