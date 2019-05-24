@@ -1,9 +1,9 @@
 package wander
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -21,8 +21,16 @@ type Spider struct {
 	allowedDomains  []*regexp.Regexp
 	throttle        *Throttle
 	domainThrottles []*DomainThrottle
-	threadn         int
-	client          *http.Client
+
+	// parallelism
+	threadn int
+
+	// http
+	client *http.Client
+
+	// control channels
+	pause  chan struct{}
+	resume chan struct{}
 
 	requestFunc  RequestFunc
 	responseFunc ResponseFunc
@@ -127,13 +135,24 @@ func (s *Spider) Follow(path string, res *Response) {
 }
 
 // Run the spider, blocks while the spider is running
-func (s *Spider) Run(ctx context.Context) {
+func (s *Spider) Run(ctx *PausableContext) {
 	wg := sync.WaitGroup{}
 	wg.Add(s.threadn)
 	for i := 0; i < s.threadn; i++ {
 		go func() {
 			for {
 				select {
+				case <-ctx.Pause():
+					log.Println("pausing")
+					select {
+					case <-ctx.Resume():
+						log.Println("resuming")
+						continue
+					case <-ctx.Done():
+						wg.Done()
+						return
+					}
+
 				case <-ctx.Done():
 					wg.Done()
 					return
