@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sync"
 )
@@ -21,6 +22,7 @@ type Spider struct {
 	throttle        *Throttle
 	domainThrottles []*DomainThrottle
 	threadn         int
+	client          *http.Client
 
 	requestFunc  RequestFunc
 	responseFunc ResponseFunc
@@ -34,6 +36,7 @@ func NewSpider(allowedDomains []string, threadn int) (*Spider, error) {
 		threadn:         threadn,
 		throttle:        nil,
 		domainThrottles: make([]*DomainThrottle, 0),
+		client:          &http.Client{},
 
 		responseFunc: func(res *Response) {},
 		requestFunc:  func(req *Request) {},
@@ -45,6 +48,38 @@ func NewSpider(allowedDomains []string, threadn int) (*Spider, error) {
 	}
 
 	return spider, nil
+}
+
+func (s *Spider) SetProxyFunc(proxyFunc func(r *http.Request) (*url.URL, error)) {
+	s.client.Transport = &http.Transport{
+		Proxy: proxyFunc,
+	}
+}
+
+// Throttle the spider, can be override on a per domain basis via ThrottleDomains
+func (s *Spider) Throttle(throttle *Throttle) {
+	s.throttle = throttle
+}
+
+// ThrottleDomains throttles specific domains, it will override the spider throttle for those domains
+func (s *Spider) ThrottleDomains(throttles ...*DomainThrottle) {
+	for _, throttle := range throttles {
+		s.domainThrottles = append(s.domainThrottles, throttle)
+	}
+}
+
+// AllowedDomains sets the allowed domains for this spider
+func (s *Spider) AllowedDomains(paths ...string) error {
+	regexs := make([]*regexp.Regexp, len(paths))
+	for i, path := range paths {
+		regex, err := regexp.Compile(path)
+		if err != nil {
+			return err
+		}
+		regexs[i] = regex
+	}
+	s.allowedDomains = regexs
+	return nil
 }
 
 // OnResponse is called when a response has been received and tokenized
@@ -89,32 +124,6 @@ func (s *Spider) Follow(path string, res *Response) {
 		s.cache.Store(path, struct{}{})
 		s.queue <- request
 	}
-}
-
-// Throttle the spider, can be override on a per domain basis via ThrottleDomains
-func (s *Spider) Throttle(throttle *Throttle) {
-	s.throttle = throttle
-}
-
-// ThrottleDomains throttles specific domains, it will override the spider throttle for those domains
-func (s *Spider) ThrottleDomains(throttles ...*DomainThrottle) {
-	for _, throttle := range throttles {
-		s.domainThrottles = append(s.domainThrottles, throttle)
-	}
-}
-
-// AllowedDomains sets the allowed domains for this spider
-func (s *Spider) AllowedDomains(paths ...string) error {
-	regexs := make([]*regexp.Regexp, len(paths))
-	for i, path := range paths {
-		regex, err := regexp.Compile(path)
-		if err != nil {
-			return err
-		}
-		regexs[i] = regex
-	}
-	s.allowedDomains = regexs
-	return nil
 }
 
 // Run the spider, blocks while the spider is running
@@ -167,7 +176,7 @@ func (s *Spider) waitThrottle(request *Request) {
 
 func (s *Spider) getResponse(request *Request) {
 	go s.requestFunc(request)
-	res, err := http.Get(request.String())
+	res, err := s.client.Get(request.String())
 	if err != nil {
 		go s.errFunc(err)
 		return
