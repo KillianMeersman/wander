@@ -1,4 +1,4 @@
-package wander
+package request
 
 import (
 	"net/http"

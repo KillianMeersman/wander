@@ -7,7 +7,10 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/KillianMeersman/wander/limits"
+
 	"github.com/KillianMeersman/wander"
+	"github.com/KillianMeersman/wander/request"
 	"github.com/PuerkitoBio/goquery"
 )
 
@@ -16,33 +19,36 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, stop := context.WithCancel(context.Background())
 
-	spid.OnResponse(func(res *wander.Response) {
+	spid.OnResponse(func(res *request.Response) {
 		log.Printf("Received response from %s\n", res.Request.URL)
 		res.Find("a[href]").Each(func(i int, sel *goquery.Selection) {
 			link, ok := sel.Attr("href")
 			if ok {
-				spid.Follow(link, res)
+				spid.Follow(link, res, 10-res.Request.Depth())
 			}
 		})
 	})
 
 	spid.OnError(func(err error) {
-		log.Printf("Error: %s\n", err)
+		//log.Printf("Error: %s\n", err)
 	})
 
-	spid.OnRequest(func(req *wander.Request) {
+	spid.OnRequest(func(req *request.Request) {
 		log.Printf("Visiting %s\n", req.String())
 	})
 
-	globalThrottle, err := wander.NewThrottle(3 * time.Second)
-	bolThrottle, err := wander.NewDomainThrottle("bol\\.com", 1*time.Second)
 	if err != nil {
 		log.Fatal(err)
 	}
-	spid.Throttle(globalThrottle)
-	spid.ThrottleDomains(bolThrottle)
+	spid.AddLimits(
+		limits.NewThrottleCollection(
+			limits.ThrottleDefault(3*time.Second),
+			limits.ThrottleDomain("bol\\.com", 100*time.Millisecond),
+		),
+		limits.MaxDepth(10),
+	)
 
 	spid.Visit("http://bol.com")
 
@@ -50,9 +56,9 @@ func main() {
 	signal.Notify(sigintc, os.Interrupt)
 	go func() {
 		<-sigintc
-		log.Print("cancelling...")
-		cancel()
+		log.Print("STOPPING...")
+		stop()
 	}()
 
-	spid.Run(ctx)
+	spid.Start(ctx)
 }

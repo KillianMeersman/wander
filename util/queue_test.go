@@ -1,7 +1,6 @@
 package util_test
 
 import (
-	"log"
 	"testing"
 
 	"github.com/KillianMeersman/wander/util"
@@ -17,7 +16,7 @@ func testStringQueue(t *testing.T, queue util.StringQueue) {
 		}
 	}
 	if queue.Count() != 1000 {
-		log.Fatal("size not 1000")
+		t.Fatal("size not 1000")
 	}
 
 	for _, str := range randStrings {
@@ -30,7 +29,7 @@ func testStringQueue(t *testing.T, queue util.StringQueue) {
 		}
 	}
 	if queue.Count() != 0 {
-		log.Fatal("size not 0")
+		t.Fatal("size not 0")
 	}
 }
 

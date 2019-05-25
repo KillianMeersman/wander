@@ -25,14 +25,18 @@ type CircularStringBuffer struct {
 	head, tail int
 	count      int
 	maxSize    int
-	lock       sync.Mutex
+	lock       *sync.Mutex
+	available  *sync.Cond
 }
 
 func NewCircularStringBuffer(capacity int, maxSize int) *CircularStringBuffer {
+	lock := &sync.Mutex{}
+
 	return &CircularStringBuffer{
-		data:    make([]string, capacity),
-		maxSize: maxSize,
-		lock:    sync.Mutex{},
+		data:      make([]string, capacity),
+		maxSize:   maxSize,
+		lock:      lock,
+		available: sync.NewCond(lock),
 	}
 }
 
@@ -64,11 +68,18 @@ func (q *CircularStringBuffer) Enqueue(value string) error {
 	q.tail = (q.tail + 1) % len(q.data)
 	q.count++
 
+	if q.count > 1 {
+		q.available.Signal()
+	}
+
 	return nil
 }
 
 func (q *CircularStringBuffer) Dequeue() (string, bool) {
 	q.lock.Lock()
+	for q.count < 1 {
+		q.available.Wait()
+	}
 	defer q.lock.Unlock()
 
 	if q.count < 1 {
