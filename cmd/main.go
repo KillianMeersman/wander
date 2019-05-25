@@ -26,7 +26,10 @@ func main() {
 		res.Find("a[href]").Each(func(i int, sel *goquery.Selection) {
 			link, ok := sel.Attr("href")
 			if ok {
-				spid.Follow(link, res, 10-res.Request.Depth())
+				err := spid.Follow(link, res, 10-res.Request.Depth())
+				if err != nil {
+					log.Fatal(err)
+				}
 			}
 		})
 	})
@@ -45,12 +48,15 @@ func main() {
 	spid.AddLimits(
 		limits.NewThrottleCollection(
 			limits.ThrottleDefault(3*time.Second),
-			limits.ThrottleDomain("bol\\.com", 100*time.Millisecond),
+			limits.ThrottleDomain("bol\\.com", 10*time.Millisecond),
 		),
 		limits.MaxDepth(10),
 	)
 
-	spid.Visit("http://bol.com")
+	err = spid.Visit("http://bol.com")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	sigintc := make(chan os.Signal, 1)
 	signal.Notify(sigintc, os.Interrupt)

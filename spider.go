@@ -3,6 +3,7 @@ package wander
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -13,15 +14,20 @@ import (
 	"github.com/KillianMeersman/wander/request"
 )
 
+// RequestFunc Callback for requests
 type RequestFunc func(req *request.Request)
+
+// ResponseFunc callback for responses
 type ResponseFunc func(res *request.Response)
+
+// ErrorFunc callback for errors
 type ErrorFunc func(err error)
 
+//SpiderState holds a spider state after a crawl, allows a spider to resume a stopped crawl
 type SpiderState struct {
 	requests request.RequestQueue
 }
 
-// Spider with callbacks
 type Spider struct {
 	cache          sync.Map
 	queue          request.RequestQueue
@@ -103,38 +109,46 @@ func (s *Spider) OnRequest(vfunc RequestFunc) {
 }
 
 // Visit a page by adding the path to the queue, blocks when the queue is full until there is free space
-func (s *Spider) Visit(path string) {
+func (s *Spider) Visit(path string) error {
 	req, err := request.NewRequest(path, nil)
 	if err != nil {
-		s.err(err)
-		return
+		return err
 	}
 
-	s.addRequest(req, 100000000000000000)
+	return s.addRequest(req, 100000000000000000)
 }
 
 // Follow a link by adding the path to the queue, blocks when the queue is full until there is free space.
 // Unlike Visit, this method also accepts a response, allowing the url parser to convert relative urls into absolute ones and keep track of depth.
-func (s *Spider) Follow(path string, res *request.Response, priority int) {
+func (s *Spider) Follow(path string, res *request.Response, priority int) error {
 	req, err := request.NewRequest(path, res.Request)
 	if err != nil {
-		s.err(err)
-		return
+		return err
 	}
 
-	s.addRequest(req, priority)
+	return s.addRequest(req, priority)
 }
 
 // Start the spider, blocks while the spider is running. Returns the spider state after context is cancelled.
 func (s *Spider) Start(ctx context.Context) *SpiderState {
-	wg := sync.WaitGroup{}
-	wg.Add(s.threadn)
+	ingestors := sync.WaitGroup{}
+	ingestors.Add(s.threadn)
+
+	extractors := sync.WaitGroup{}
+	extractors.Add(s.threadn)
+	extractorCtx, stopExtractors := context.WithCancel(context.Background())
+
+	reqc := make(chan *request.Request)
+	resc := make(chan *request.Response)
+	errc := make(chan error)
+
 	for i := 0; i < s.threadn; i++ {
 		go func() {
 			for {
 				select {
 				case <-ctx.Done():
-					wg.Done()
+					ingestors.Done()
+					log.Println("ingestor done")
 					return
 
 				case req := <-s.queue.Dequeue(ctx):
@@ -142,19 +156,46 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 						for _, limit := range s.limits {
 							err := limit.Check(req)
 							if err != nil {
-								s.err(err)
+								errc <- err
 								continue
 							}
 						}
-						s.getResponse(req)
+						reqc <- req
+						res, err := s.getResponse(req)
+						if err != nil {
+							errc <- err
+							continue
+						}
+						resc <- res
 					} else {
-						s.err(fmt.Errorf("domain %s filtered", req.String()))
+						errc <- fmt.Errorf("domain %s filtered", req.String())
 					}
 				}
 			}
 		}()
+
+		go func() {
+			for {
+				select {
+				case <-extractorCtx.Done():
+					extractors.Done()
+					log.Println("extractor done")
+					return
+
+				case req := <-reqc:
+					s.requestFunc(req)
+				case res := <-resc:
+					s.responseFunc(res)
+				case err := <-errc:
+					s.errFunc(err)
+				}
+			}
+		}()
 	}
-	wg.Wait()
+
+	ingestors.Wait()
+	stopExtractors()
+	extractors.Wait()
 	return &SpiderState{
 		requests: s.queue,
 	}
@@ -175,46 +216,31 @@ func (s *Spider) filterDomains(request *request.Request) bool {
 	return false
 }
 
-func (s *Spider) getResponse(req *request.Request) {
-	s.request(req)
+func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 	res, err := s.client.Get(req.String())
 	if err != nil {
-		s.err(err)
-		return
+		return nil, err
 	}
 	doc, err := request.NewResponse(req, res)
 	if err != nil {
-		s.err(err)
-		return
+		return nil, err
 	}
-	s.response(doc)
+	return doc, nil
 }
 
-func (s *Spider) addRequest(req *request.Request, priority int) {
+func (s *Spider) addRequest(req *request.Request, priority int) error {
 	for _, limit := range s.limits {
 		err := limit.NewRequest(req)
 		if err != nil {
-			s.err(err)
-			return
+			return err
 		}
 	}
 	if _, ok := s.cache.Load(req.URL.String()); !ok {
 		s.cache.Store(req.URL.String(), struct{}{})
 		err := s.queue.Enqueue(req, priority)
 		if err != nil {
-			s.err(err)
+			return err
 		}
 	}
-}
-
-func (s *Spider) request(req *request.Request) {
-	go s.requestFunc(req)
-}
-
-func (s *Spider) response(res *request.Response) {
-	go s.responseFunc(res)
-}
-
-func (s *Spider) err(err error) {
-	go s.errFunc(err)
+	return nil
 }
