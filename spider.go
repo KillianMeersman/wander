@@ -40,37 +40,70 @@ type Spider struct {
 	// http
 	client *http.Client
 
-	// control channels
-	pause  chan struct{}
-	resume chan struct{}
-
+	// callbacks
 	requestFunc  RequestFunc
 	responseFunc ResponseFunc
 	errFunc      ErrorFunc
 }
 
-func NewSpider(allowedDomains []string, threadn int) (*Spider, error) {
+func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 	spider := &Spider{
-		cache:   sync.Map{},
-		queue:   request.NewRequestHeap(10000),
-		threadn: threadn,
-		limits:  make([]limits.Limit, 0),
-		client:  &http.Client{},
-
-		responseFunc: func(res *request.Response) {},
-		requestFunc:  func(req *request.Request) {},
-		errFunc:      func(err error) {},
+		cache:          sync.Map{},
+		queue:          request.NewRequestHeap(10000),
+		allowedDomains: make([]*regexp.Regexp, 0),
+		limits:         make([]limits.Limit, 0),
+		threadn:        1,
+		client:         &http.Client{},
+		responseFunc:   func(res *request.Response) {},
+		requestFunc:    func(req *request.Request) {},
+		errFunc:        func(err error) {},
 	}
-	err := spider.AllowedDomains(allowedDomains...)
-	if err != nil {
-		return nil, err
+
+	for _, option := range options {
+		err := option(spider)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return spider, nil
 }
 
+// Constructor options
+func AllowedDomains(domains ...string) func(s *Spider) error {
+	return func(s *Spider) error {
+		return s.AllowedDomains(domains...)
+	}
+}
+
+func Threads(n int) func(s *Spider) error {
+	return func(s *Spider) error {
+		s.threadn = n
+		return nil
+	}
+}
+
+func ProxyFunc(f func(r *http.Request) (*url.URL, error)) func(s *Spider) error {
+	return func(s *Spider) error {
+		s.SetProxyFunc(f)
+		return nil
+	}
+}
+
+func MaxDepth(max int) func(s *Spider) error {
+	return func(s *Spider) error {
+		s.AddLimits(limits.MaxDepth(max))
+		return nil
+	}
+}
+
 func (s *Spider) AddLimits(limits ...limits.Limit) {
 	s.limits = append(s.limits, limits...)
+}
+
+func (s *Spider) Throttle(def *limits.DefaultThrottle, throttles ...limits.Throttle) {
+	group := limits.NewThrottleCollection(def, throttles...)
+	s.AddLimits(group)
 }
 
 func (s *Spider) SetProxyFunc(proxyFunc func(r *http.Request) (*url.URL, error)) {

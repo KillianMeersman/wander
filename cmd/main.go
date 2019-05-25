@@ -15,7 +15,11 @@ import (
 )
 
 func main() {
-	spid, err := wander.NewSpider([]string{"bol\\.com"}, 4)
+	spid, err := wander.NewSpider(
+		wander.AllowedDomains("bol\\.com"),
+		wander.Threads(5),
+		wander.MaxDepth(10),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -42,15 +46,9 @@ func main() {
 		log.Printf("Visiting %s\n", req.String())
 	})
 
-	if err != nil {
-		log.Fatal(err)
-	}
-	spid.AddLimits(
-		limits.NewThrottleCollection(
-			limits.ThrottleDefault(3*time.Second),
-			limits.ThrottleDomain("bol\\.com", 10*time.Millisecond),
-		),
-		limits.MaxDepth(10),
+	spid.Throttle(
+		limits.ThrottleDefault(3*time.Second),
+		limits.ThrottleDomain("bol\\.com", 10*time.Millisecond),
 	)
 
 	err = spid.Visit("http://bol.com")
