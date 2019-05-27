@@ -43,12 +43,12 @@ func randomRequests(n int) ([]*request.Request, error) {
 	return requests, nil
 }
 
-func BenchmarkHeap(b *testing.B) {
+func BenchmarkRequestHeap(b *testing.B) {
 	requests, err := randomRequests(1000)
 	if err != nil {
 		b.Fatal(err)
 	}
-	heap := request.NewRequestHeap(1000)
+	heap := request.NewRequestHeap(10000)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -77,4 +77,32 @@ func BenchmarkHeap(b *testing.B) {
 		}
 	}()
 	<-c
+}
+
+func TestRequestHeapEqualPriority(t *testing.T) {
+	requests, err := randomRequests(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	heap := request.NewRequestHeap(10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, req := range requests {
+		heap.Enqueue(req, 1)
+	}
+
+	ctx := context.Background()
+	i := 0
+	for req := range heap.Dequeue(ctx) {
+		if req != requests[i] {
+			t.Fatal("requests dequeued in incorrect order")
+		}
+		i++
+		if heap.Count() < 1 {
+			break
+		}
+	}
 }

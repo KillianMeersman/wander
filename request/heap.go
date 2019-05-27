@@ -37,22 +37,25 @@ type RequestHeap struct {
 }
 
 func NewRequestHeap(maxSize int) *RequestHeap {
+	data := make([]requestHeapNode, maxSize/10)
+	return BuildRequestHeap(data, maxSize)
+}
+
+func BuildRequestHeap(data []requestHeapNode, maxSize int) *RequestHeap {
 	lock := &sync.Mutex{}
 	heap := &RequestHeap{
-		data:      make([]requestHeapNode, maxSize/10),
+		data:      data,
 		maxSize:   maxSize,
 		lock:      lock,
 		available: sync.NewCond(lock),
 		outc:      make(chan *Request),
 	}
 
-	return heap
-}
-
-func BuildRequestHeap(data []requestHeapNode, i int) {
-	for i := len(data) / 2; i > 0; i++ {
-		maxHeapify(data, len(data), i)
+	for i := len(data) / 2; i >= 0; i-- {
+		heap.maxHeapify(i)
 	}
+
+	return heap
 }
 
 func (r *RequestHeap) Enqueue(req *Request, priority int) error {
@@ -116,13 +119,15 @@ func (r *RequestHeap) insert(req *Request, priority int) error {
 	}
 
 	i := r.count
-	r.data[r.count] = node
-	parent := i / 2
+	parent := parentIndex(i)
+	r.data[i] = node
+
 	for i > 0 && r.data[i].priority > r.data[parent].priority {
 		r.data[i], r.data[parent] = r.data[parent], r.data[i]
-		i = i / 2
-		parent = i / 2
+		i = parentIndex(i)
+		parent = parentIndex(i)
 	}
+
 	r.count++
 	return nil
 }
@@ -130,38 +135,50 @@ func (r *RequestHeap) insert(req *Request, priority int) error {
 func (r *RequestHeap) extract() *Request {
 	req := r.data[0].request
 	r.count--
-	r.data[0] = r.data[r.count]
+	r.data[0] = r.data[r.count-1]
 
-	maxHeapify(r.data, r.count, 0)
+	r.maxHeapify(0)
 
 	return req
 }
 
-func maxHeapify(data []requestHeapNode, length, i int) {
-	left := 2 * i
-	right := (2 * i) + 1
-	largest := i
+func (r *RequestHeap) maxHeapify(i int) {
+	left := leftChildIndex(i)
+	right := rightChildIndex(i)
+	max := i
 
-	if left <= length && data[left].priority > data[largest].priority {
-		largest = left
+	if left < r.count && r.data[left].priority > r.data[max].priority {
+		max = left
 	}
-	if right <= length && data[right].priority > data[largest].priority {
-		largest = right
+	if right < r.count && r.data[right].priority > r.data[max].priority {
+		max = right
 	}
-	if largest != i {
-		data[i], data[largest] = data[largest], data[i]
-		maxHeapify(data, length, largest)
+	if max != i {
+		r.data[i], r.data[max] = r.data[max], r.data[i]
+		r.maxHeapify(max)
 	}
+}
+
+func leftChildIndex(i int) int {
+	return (i * 2) + 1
+}
+
+func rightChildIndex(i int) int {
+	return (i * 2) + 2
+}
+
+func parentIndex(i int) int {
+	return i / 2
 }
 
 func (r *RequestHeap) leftChild(i int) requestHeapNode {
-	return r.data[2*i]
+	return r.data[leftChildIndex(i)]
 }
 
 func (r *RequestHeap) rightChild(i int) requestHeapNode {
-	return r.data[(2*i)+1]
+	return r.data[rightChildIndex(i)]
 }
 
 func (r *RequestHeap) parent(i int) requestHeapNode {
-	return r.data[i/2]
+	return r.data[parentIndex(i)]
 }
