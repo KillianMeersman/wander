@@ -51,7 +51,6 @@ type Spider struct {
 // NewSpider return a new spider
 func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 	state := SpiderState{
-		queue: request.NewRequestHeap(10000),
 		cache: &sync.Map{},
 	}
 	spider := &Spider{
@@ -71,6 +70,7 @@ func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 			return nil, err
 		}
 	}
+	spider.init()
 
 	return spider, nil
 }
@@ -106,6 +106,13 @@ func ProxyFunc(f func(r *http.Request) (*url.URL, error)) func(s *Spider) error 
 func MaxDepth(max int) func(s *Spider) error {
 	return func(s *Spider) error {
 		s.AddLimits(limits.MaxDepth(max))
+		return nil
+	}
+}
+
+func Queue(queue request.RequestQueue) func(s *Spider) error {
+	return func(s *Spider) error {
+		s.queue = queue
 		return nil
 	}
 }
@@ -188,65 +195,38 @@ func (s *Spider) Follow(path string, res *request.Response, priority int) error 
 
 // Start the spider, blocks while the spider is running. Returns the spider state after context is cancelled.
 func (s *Spider) Start(ctx context.Context) *SpiderState {
-	ingestors := sync.WaitGroup{}
-	ingestors.Add(s.threadn)
-
-	pipelines := sync.WaitGroup{}
-	pipelines.Add(s.threadn)
-	pipelineCtx, stopPipelines := context.WithCancel(context.Background())
-
-	reqc := make(chan *request.Request)
-	resc := make(chan *request.Response)
-	errc := make(chan error)
+	wg := sync.WaitGroup{}
+	wg.Add(s.threadn)
 
 	for i := 0; i < s.threadn; i++ {
 		go func() {
 			for {
 				select {
 				case <-ctx.Done():
-					ingestors.Done()
+					wg.Done()
 					return
 
 				case req := <-s.queue.Dequeue(ctx):
 					if s.filterDomains(req) {
 						s.throttle.Wait(req)
-						reqc <- req
+						s.requestFunc(req)
 
 						res, err := s.getResponse(req)
 						if err != nil {
-							errc <- err
+							s.errFunc(err)
 							continue
 						}
-						resc <- res
+						s.responseFunc(res)
 
 					} else {
-						errc <- fmt.Errorf("domain %s filtered", req.String())
+						s.errFunc(fmt.Errorf("domain %s filtered", req.String()))
 					}
-				}
-			}
-		}()
-
-		go func() {
-			for {
-				select {
-				case <-pipelineCtx.Done():
-					pipelines.Done()
-					return
-
-				case req := <-reqc:
-					s.requestFunc(req)
-				case res := <-resc:
-					s.responseFunc(res)
-				case err := <-errc:
-					s.errFunc(err)
 				}
 			}
 		}()
 	}
 
-	ingestors.Wait()
-	stopPipelines()
-	pipelines.Wait()
+	wg.Wait()
 	return &s.SpiderState
 }
 
@@ -254,6 +234,12 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 func (s *Spider) Resume(ctx context.Context, state *SpiderState) *SpiderState {
 	s.SpiderState = *state
 	return s.Start(ctx)
+}
+
+func (s *Spider) init() {
+	if s.queue == nil {
+		s.queue = request.NewRequestHeap(10000)
+	}
 }
 
 func (s *Spider) filterDomains(request *request.Request) bool {

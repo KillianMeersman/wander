@@ -2,7 +2,7 @@ package request
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -11,6 +11,14 @@ type RequestQueue interface {
 	Enqueue(req *Request, priority int) error
 	Dequeue(ctx context.Context) <-chan *Request
 	Count() int
+}
+
+type RequestQueueMaxSize struct {
+	size int
+}
+
+func (r *RequestQueueMaxSize) Error() string {
+	return fmt.Sprintf("Request queue has reached maximum size of %d", r.size)
 }
 
 type requestHeapNode struct {
@@ -98,7 +106,7 @@ func (r *RequestHeap) insert(req *Request, priority int) error {
 		newSize := (len(r.data) * 2) + 1
 		if newSize > r.maxSize {
 			if r.count == r.maxSize {
-				return errors.New("Heap capacity already at max")
+				return &RequestQueueMaxSize{size: r.maxSize}
 			}
 			newSize = r.maxSize
 		}
