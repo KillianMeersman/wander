@@ -2,8 +2,8 @@ package wander
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -14,7 +14,7 @@ import (
 	"github.com/KillianMeersman/wander/request"
 )
 
-// RequestFunc Callback for requests
+// RequestFunc callback for requests
 type RequestFunc func(req *request.Request)
 
 // ResponseFunc callback for responses
@@ -25,14 +25,16 @@ type ErrorFunc func(err error)
 
 //SpiderState holds a spider state after a crawl, allows a spider to resume a stopped crawl
 type SpiderState struct {
-	requests request.RequestQueue
+	queue request.RequestQueue
+	cache *sync.Map
 }
 
+// Spider is the high level crawler
 type Spider struct {
-	cache          sync.Map
-	queue          request.RequestQueue
+	SpiderState
 	allowedDomains []*regexp.Regexp
-	limits         []limits.Limit
+	limits         map[string]limits.Limit
+	throttle       limits.ThrottleCollection
 
 	// parallelism
 	threadn int
@@ -46,13 +48,17 @@ type Spider struct {
 	errFunc      ErrorFunc
 }
 
+// NewSpider return a new spider
 func NewSpider(options ...func(*Spider) error) (*Spider, error) {
+	state := SpiderState{
+		queue: request.NewRequestHeap(10000),
+		cache: &sync.Map{},
+	}
 	spider := &Spider{
-		cache:          sync.Map{},
-		queue:          request.NewRequestHeap(10000),
+		SpiderState:    state,
 		allowedDomains: make([]*regexp.Regexp, 0),
-		limits:         make([]limits.Limit, 0),
-		threadn:        1,
+		limits:         make(map[string]limits.Limit),
+		threadn:        4,
 		client:         &http.Client{},
 		responseFunc:   func(res *request.Response) {},
 		requestFunc:    func(req *request.Request) {},
@@ -69,13 +75,18 @@ func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 	return spider, nil
 }
 
-// Constructor options
+/*
+	Constructor options
+*/
+
+// AllowedDomains sets allowed domains, utility funtion for SetAllowedDomains
 func AllowedDomains(domains ...string) func(s *Spider) error {
 	return func(s *Spider) error {
-		return s.AllowedDomains(domains...)
+		return s.SetAllowedDomains(domains...)
 	}
 }
 
+// Threads sets the amount of threads the spider will spawn for ingestors and pipeline functions. Note that n*2 goroutines will be spawned. Defaults to 4
 func Threads(n int) func(s *Spider) error {
 	return func(s *Spider) error {
 		s.threadn = n
@@ -83,6 +94,7 @@ func Threads(n int) func(s *Spider) error {
 	}
 }
 
+// ProxyFunc sets the proxy function, utility function for SetProxyFunc
 func ProxyFunc(f func(r *http.Request) (*url.URL, error)) func(s *Spider) error {
 	return func(s *Spider) error {
 		s.SetProxyFunc(f)
@@ -90,6 +102,7 @@ func ProxyFunc(f func(r *http.Request) (*url.URL, error)) func(s *Spider) error 
 	}
 }
 
+// MaxDepth sets the maximum spider depth
 func MaxDepth(max int) func(s *Spider) error {
 	return func(s *Spider) error {
 		s.AddLimits(limits.MaxDepth(max))
@@ -97,13 +110,25 @@ func MaxDepth(max int) func(s *Spider) error {
 	}
 }
 
+// AddLimits adds limits to the spider, deduplicates limits.
 func (s *Spider) AddLimits(limits ...limits.Limit) {
-	s.limits = append(s.limits, limits...)
+	for _, limit := range limits {
+		contents, _ := json.Marshal(limit)
+		s.limits[string(contents)] = limit
+	}
 }
 
-func (s *Spider) Throttle(def *limits.DefaultThrottle, throttles ...limits.Throttle) {
-	group := limits.NewThrottleCollection(def, throttles...)
-	s.AddLimits(group)
+// AddLimits adds limits to the spider, deduplicates limits.
+func (s *Spider) RemoveLimits(limits ...limits.Limit) {
+	for _, limit := range limits {
+		contents, _ := json.Marshal(limit)
+		delete(s.limits, string(contents))
+	}
+}
+
+// SetThrottles sets or replaces the default and custom throttles for the spider
+func (s *Spider) SetThrottles(def *limits.DefaultThrottle, throttles ...limits.Throttle) {
+	s.throttle = limits.NewThrottleCollection(def, throttles...)
 }
 
 func (s *Spider) SetProxyFunc(proxyFunc func(r *http.Request) (*url.URL, error)) {
@@ -112,8 +137,7 @@ func (s *Spider) SetProxyFunc(proxyFunc func(r *http.Request) (*url.URL, error))
 	}
 }
 
-// AllowedDomains sets the allowed domains for this spider
-func (s *Spider) AllowedDomains(paths ...string) error {
+func (s *Spider) SetAllowedDomains(paths ...string) error {
 	regexs := make([]*regexp.Regexp, len(paths))
 	for i, path := range paths {
 		regex, err := regexp.Compile(path)
@@ -167,9 +191,9 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 	ingestors := sync.WaitGroup{}
 	ingestors.Add(s.threadn)
 
-	extractors := sync.WaitGroup{}
-	extractors.Add(s.threadn)
-	extractorCtx, stopExtractors := context.WithCancel(context.Background())
+	pipelines := sync.WaitGroup{}
+	pipelines.Add(s.threadn)
+	pipelineCtx, stopPipelines := context.WithCancel(context.Background())
 
 	reqc := make(chan *request.Request)
 	resc := make(chan *request.Response)
@@ -181,25 +205,20 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 				select {
 				case <-ctx.Done():
 					ingestors.Done()
-					log.Println("ingestor done")
 					return
 
 				case req := <-s.queue.Dequeue(ctx):
 					if s.filterDomains(req) {
-						for _, limit := range s.limits {
-							err := limit.Check(req)
-							if err != nil {
-								errc <- err
-								continue
-							}
-						}
+						s.throttle.Wait(req)
 						reqc <- req
+
 						res, err := s.getResponse(req)
 						if err != nil {
 							errc <- err
 							continue
 						}
 						resc <- res
+
 					} else {
 						errc <- fmt.Errorf("domain %s filtered", req.String())
 					}
@@ -210,9 +229,8 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 		go func() {
 			for {
 				select {
-				case <-extractorCtx.Done():
-					extractors.Done()
-					log.Println("extractor done")
+				case <-pipelineCtx.Done():
+					pipelines.Done()
 					return
 
 				case req := <-reqc:
@@ -227,16 +245,14 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 	}
 
 	ingestors.Wait()
-	stopExtractors()
-	extractors.Wait()
-	return &SpiderState{
-		requests: s.queue,
-	}
+	stopPipelines()
+	pipelines.Wait()
+	return &s.SpiderState
 }
 
 // Resume from spider state
 func (s *Spider) Resume(ctx context.Context, state *SpiderState) *SpiderState {
-	s.queue = state.requests
+	s.SpiderState = *state
 	return s.Start(ctx)
 }
 
@@ -254,6 +270,7 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	doc, err := request.NewResponse(req, res)
 	if err != nil {
 		return nil, err
@@ -263,11 +280,12 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 
 func (s *Spider) addRequest(req *request.Request, priority int) error {
 	for _, limit := range s.limits {
-		err := limit.NewRequest(req)
+		err := limit.FilterRequest(req)
 		if err != nil {
 			return err
 		}
 	}
+
 	if _, ok := s.cache.Load(req.URL.String()); !ok {
 		s.cache.Store(req.URL.String(), struct{}{})
 		err := s.queue.Enqueue(req, priority)

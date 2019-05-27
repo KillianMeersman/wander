@@ -6,11 +6,14 @@ import (
 	"net/url"
 )
 
-func NewProxyURL(username, password, scheme, path string) (*url.URL, error) {
+// BuildProxyURL will build a url based on a username, password, scheme and path.
+// Return an error when the url is invalid.
+func BuildProxyURL(username, password, scheme, path string) (*url.URL, error) {
 	completePath := fmt.Sprintf("%s://%s:%s@%s", scheme, username, password, path)
 	return url.Parse(completePath)
 }
 
+// RoundRobinProxy will return each proxy in rotating order
 func RoundRobinProxy(urls ...*url.URL) func(r *http.Request) (*url.URL, error) {
 	if len(urls) < 1 {
 		return nil
