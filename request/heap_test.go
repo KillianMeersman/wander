@@ -43,42 +43,6 @@ func randomRequests(n int) ([]*request.Request, error) {
 	return requests, nil
 }
 
-func BenchmarkRequestHeap(b *testing.B) {
-	requests, err := randomRequests(1000)
-	if err != nil {
-		b.Fatal(err)
-	}
-	heap := request.NewRequestHeap(10000)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	done := false
-	go func() {
-		for _, req := range requests {
-			heap.Enqueue(req, 100-req.Depth())
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-		done = true
-	}()
-
-	ctx := context.Background()
-	c := make(chan struct{})
-	time.Sleep(100 * time.Millisecond)
-	go func() {
-		select {
-		case <-heap.Dequeue(ctx):
-		default:
-			if heap.Count() < 1 && done {
-				c <- struct{}{}
-			}
-		}
-	}()
-	<-c
-}
-
 func TestRequestHeapEqualPriority(t *testing.T) {
 	requests, err := randomRequests(1000)
 	if err != nil {

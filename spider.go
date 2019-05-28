@@ -37,7 +37,8 @@ type Spider struct {
 	throttle       limits.ThrottleCollection
 
 	// parallelism
-	threadn int
+	ingestorN int
+	pipelineN int
 
 	// http
 	client *http.Client
@@ -57,7 +58,8 @@ func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 		SpiderState:    state,
 		allowedDomains: make([]*regexp.Regexp, 0),
 		limits:         make(map[string]limits.Limit),
-		threadn:        4,
+		pipelineN:      1,
+		ingestorN:      1,
 		client:         &http.Client{},
 		responseFunc:   func(res *request.Response) {},
 		requestFunc:    func(req *request.Request) {},
@@ -86,10 +88,27 @@ func AllowedDomains(domains ...string) func(s *Spider) error {
 	}
 }
 
-// Threads sets the amount of threads the spider will spawn for ingestors and pipeline functions. Note that n*2 goroutines will be spawned. Defaults to 4
+// Ingestors sets the amount of goroutines for ingestors
+func Ingestors(n int) func(s *Spider) error {
+	return func(s *Spider) error {
+		s.ingestorN = n
+		return nil
+	}
+}
+
+// Pipelines sets the amount of goroutines for callback functions
+func Pipelines(n int) func(s *Spider) error {
+	return func(s *Spider) error {
+		s.pipelineN = n
+		return nil
+	}
+}
+
+// Threads sets the amount of ingestors and pipelines to n, spawning a total of n*2 goroutines.
 func Threads(n int) func(s *Spider) error {
 	return func(s *Spider) error {
-		s.threadn = n
+		s.ingestorN = n
+		s.pipelineN = n
 		return nil
 	}
 }
@@ -110,6 +129,7 @@ func MaxDepth(max int) func(s *Spider) error {
 	}
 }
 
+// Queue sets the RequestQueue
 func Queue(queue request.RequestQueue) func(s *Spider) error {
 	return func(s *Spider) error {
 		s.queue = queue
@@ -125,7 +145,7 @@ func (s *Spider) AddLimits(limits ...limits.Limit) {
 	}
 }
 
-// AddLimits adds limits to the spider, deduplicates limits.
+// RemoveLimits removes the given limits
 func (s *Spider) RemoveLimits(limits ...limits.Limit) {
 	for _, limit := range limits {
 		contents, _ := json.Marshal(limit)
@@ -138,12 +158,14 @@ func (s *Spider) SetThrottles(def *limits.DefaultThrottle, throttles ...limits.T
 	s.throttle = limits.NewThrottleCollection(def, throttles...)
 }
 
+// SetProxyFunc sets the proxy function to be used
 func (s *Spider) SetProxyFunc(proxyFunc func(r *http.Request) (*url.URL, error)) {
 	s.client.Transport = &http.Transport{
 		Proxy: proxyFunc,
 	}
 }
 
+// SetAllowedDomains sets the allowed domain regexs.
 func (s *Spider) SetAllowedDomains(paths ...string) error {
 	regexs := make([]*regexp.Regexp, len(paths))
 	for i, path := range paths {
@@ -195,28 +217,35 @@ func (s *Spider) Follow(path string, res *request.Response, priority int) error 
 
 // Start the spider, blocks while the spider is running. Returns the spider state after context is cancelled.
 func (s *Spider) Start(ctx context.Context) *SpiderState {
-	wg := sync.WaitGroup{}
-	wg.Add(s.threadn)
+	ingestors := sync.WaitGroup{}
+	ingestors.Add(s.ingestorN)
+	pipelines := sync.WaitGroup{}
+	pipelines.Add(s.pipelineN)
+	pipelinesCtx, stopPipelines := context.WithCancel(context.Background())
 
-	for i := 0; i < s.threadn; i++ {
+	reqc := make(chan *request.Request)
+	resc := make(chan *request.Response)
+	errc := make(chan error)
+
+	for i := 0; i < s.ingestorN; i++ {
 		go func() {
 			for {
 				select {
 				case <-ctx.Done():
-					wg.Done()
+					ingestors.Done()
 					return
 
 				case req := <-s.queue.Dequeue(ctx):
 					if s.filterDomains(req) {
 						s.throttle.Wait(req)
-						s.requestFunc(req)
+						reqc <- req
 
 						res, err := s.getResponse(req)
 						if err != nil {
-							s.errFunc(err)
+							errc <- err
 							continue
 						}
-						s.responseFunc(res)
+						resc <- res
 
 					} else {
 						s.errFunc(fmt.Errorf("domain %s filtered", req.String()))
@@ -226,7 +255,27 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 		}()
 	}
 
-	wg.Wait()
+	for i := 0; i < s.pipelineN; i++ {
+		go func() {
+			for {
+				select {
+				case req := <-reqc:
+					s.requestFunc(req)
+				case res := <-resc:
+					s.responseFunc(res)
+				case err := <-errc:
+					s.errFunc(err)
+				case <-pipelinesCtx.Done():
+					pipelines.Done()
+					return
+				}
+			}
+		}()
+	}
+
+	ingestors.Wait()
+	stopPipelines()
+	pipelines.Wait()
 	return &s.SpiderState
 }
 
