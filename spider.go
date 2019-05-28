@@ -26,7 +26,7 @@ type ErrorFunc func(err error)
 //SpiderState holds a spider state after a crawl, allows a spider to resume a stopped crawl
 type SpiderState struct {
 	queue request.RequestQueue
-	cache *sync.Map
+	cache request.RequestCache
 }
 
 // Spider is the high level crawler
@@ -51,11 +51,8 @@ type Spider struct {
 
 // NewSpider return a new spider
 func NewSpider(options ...func(*Spider) error) (*Spider, error) {
-	state := SpiderState{
-		cache: &sync.Map{},
-	}
 	spider := &Spider{
-		SpiderState:    state,
+		SpiderState:    SpiderState{},
 		allowedDomains: make([]*regexp.Regexp, 0),
 		limits:         make(map[string]limits.Limit),
 		pipelineN:      1,
@@ -137,6 +134,14 @@ func Queue(queue request.RequestQueue) func(s *Spider) error {
 	}
 }
 
+// Cache sets the RequestCache
+func Cache(cache request.RequestCache) func(s *Spider) error {
+	return func(s *Spider) error {
+		s.cache = cache
+		return nil
+	}
+}
+
 // AddLimits adds limits to the spider, deduplicates limits.
 func (s *Spider) AddLimits(limits ...limits.Limit) {
 	for _, limit := range limits {
@@ -201,7 +206,7 @@ func (s *Spider) Visit(path string) error {
 		return err
 	}
 
-	return s.addRequest(req, 100000000000000000)
+	return s.addRequest(req, int(^uint(0)>>1))
 }
 
 // Follow a link by adding the path to the queue, blocks when the queue is full until there is free space.
@@ -289,6 +294,9 @@ func (s *Spider) init() {
 	if s.queue == nil {
 		s.queue = request.NewRequestHeap(10000)
 	}
+	if s.cache == nil {
+		s.cache = request.NewRequestCache()
+	}
 }
 
 func (s *Spider) filterDomains(request *request.Request) bool {
@@ -321,8 +329,8 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 		}
 	}
 
-	if _, ok := s.cache.Load(req.URL.String()); !ok {
-		s.cache.Store(req.URL.String(), struct{}{})
+	if !s.cache.Visited(req) {
+		s.cache.AddRequest(req)
 		err := s.queue.Enqueue(req, priority)
 		if err != nil {
 			return err

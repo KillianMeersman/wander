@@ -3,29 +3,14 @@ package util_test
 import (
 	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/KillianMeersman/wander/util"
 )
 
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
-func randomString(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letterRunes[rand.Intn(len(letterRunes))]
-	}
-	return string(b)
-}
-
 func randomStrings(n int) []string {
 	randStrings := make([]string, n)
 	for i := 0; i < n; i++ {
-		randStrings[i] = randomString(rand.Intn(100))
+		randStrings[i] = util.RandomString(rand.Intn(100))
 	}
 	return randStrings
 }

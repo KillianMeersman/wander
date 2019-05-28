@@ -4,33 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
 	"regexp"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/KillianMeersman/wander"
 	"github.com/KillianMeersman/wander/request"
+	"github.com/KillianMeersman/wander/util"
 	"github.com/PuerkitoBio/goquery"
 )
-
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
-func randomString(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letterRunes[rand.Intn(len(letterRunes))]
-	}
-	return string(b)
-}
 
 type route struct {
 	pattern *regexp.Regexp
@@ -69,7 +54,7 @@ func randomLinkServer() *http.Server {
 		<a href="/%s">test</a>
 		<a href="/%s">test</a>
 		</body>
-		</html>`, randomString(20), randomString(20), randomString(20)))
+		</html>`, util.RandomString(20), util.RandomString(20), util.RandomString(20)))
 
 		w.Write(msg)
 	}
@@ -88,7 +73,7 @@ func BenchmarkSpider(b *testing.B) {
 	queue := request.NewRequestHeap(10000)
 	spid, err := wander.NewSpider(
 		wander.AllowedDomains("127.0.0.1"),
-		wander.Threads(4),
+		wander.Threads(1),
 		wander.Queue(queue),
 	)
 	if err != nil {

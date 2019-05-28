@@ -3,32 +3,17 @@ package request_test
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/KillianMeersman/wander/request"
+	"github.com/KillianMeersman/wander/util"
 )
-
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
-func randomString(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letterRunes[rand.Intn(len(letterRunes))]
-	}
-	return string(b)
-}
 
 func randomRequests(n int) ([]*request.Request, error) {
 	requests := make([]*request.Request, n)
 	var parent *request.Request = nil
 	for i := 0; i < n; i++ {
-		req, err := request.NewRequest(fmt.Sprintf("http://%s", randomString(50)), parent)
+		req, err := request.NewRequest(fmt.Sprintf("http://%s", util.RandomString(50)), parent)
 		if err != nil {
 			return nil, err
 		}
