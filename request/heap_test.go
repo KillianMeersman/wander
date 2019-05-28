@@ -91,7 +91,10 @@ func TestRequestHeapEqualPriority(t *testing.T) {
 	}
 
 	for _, req := range requests {
-		heap.Enqueue(req, 1)
+		err := heap.Enqueue(req, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	ctx := context.Background()
@@ -101,6 +104,37 @@ func TestRequestHeapEqualPriority(t *testing.T) {
 			t.Fatal("requests dequeued in incorrect order")
 		}
 		i++
+		if heap.Count() < 1 {
+			break
+		}
+	}
+}
+
+func TestRequestHeapDifferentPriority(t *testing.T) {
+	requests, err := randomRequests(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	heap := request.NewRequestHeap(10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, req := range requests {
+		err := heap.Enqueue(req, i)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx := context.Background()
+	i := 999
+	for req := range heap.Dequeue(ctx) {
+		if req != requests[i] {
+			t.Fatal("requests dequeued in incorrect order")
+		}
+		i--
 		if heap.Count() < 1 {
 			break
 		}

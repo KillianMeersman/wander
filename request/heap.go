@@ -17,28 +17,49 @@ type RequestQueueMaxSize struct {
 	size int
 }
 
-func (r *RequestQueueMaxSize) Error() string {
+func (r RequestQueueMaxSize) Error() string {
 	return fmt.Sprintf("Request queue has reached maximum size of %d", r.size)
 }
 
 type requestHeapNode struct {
-	priority int
-	request  *Request
+	priority       int
+	insertionCount int
+	request        *Request
+}
+
+func less(a, b requestHeapNode) bool {
+	if a.priority < b.priority {
+		return true
+	}
+	if a.priority == b.priority {
+		if a.insertionCount > b.insertionCount {
+			return true
+		}
+	}
+	return false
 }
 
 type RequestHeap struct {
-	data        []requestHeapNode
-	count       int
-	maxSize     int
-	lock        *sync.Mutex
-	available   *sync.Cond
-	outc        chan *Request
-	inintalized bool
+	data           []requestHeapNode
+	count          int
+	maxSize        int
+	lock           *sync.Mutex
+	available      *sync.Cond
+	outc           chan *Request
+	inintalized    bool
+	insertionCount int
 }
 
 func NewRequestHeap(maxSize int) *RequestHeap {
-	data := make([]requestHeapNode, maxSize/10)
-	return BuildRequestHeap(data, maxSize)
+	lock := &sync.Mutex{}
+	heap := &RequestHeap{
+		data:      make([]requestHeapNode, maxSize/10),
+		maxSize:   maxSize,
+		lock:      lock,
+		available: sync.NewCond(lock),
+		outc:      make(chan *Request),
+	}
+	return heap
 }
 
 func BuildRequestHeap(data []requestHeapNode, maxSize int) *RequestHeap {
@@ -101,8 +122,9 @@ func (r *RequestHeap) Count() int {
 
 func (r *RequestHeap) insert(req *Request, priority int) error {
 	node := requestHeapNode{
-		priority: priority,
-		request:  req,
+		priority:       priority,
+		request:        req,
+		insertionCount: r.insertionCount + 1,
 	}
 
 	if r.count >= len(r.data) {
@@ -129,16 +151,15 @@ func (r *RequestHeap) insert(req *Request, priority int) error {
 	}
 
 	r.count++
+	r.insertionCount++
 	return nil
 }
 
 func (r *RequestHeap) extract() *Request {
 	req := r.data[0].request
 	r.count--
-	r.data[0] = r.data[r.count-1]
-
+	r.data[0] = r.data[r.count]
 	r.maxHeapify(0)
-
 	return req
 }
 
@@ -147,10 +168,10 @@ func (r *RequestHeap) maxHeapify(i int) {
 	right := rightChildIndex(i)
 	max := i
 
-	if left < r.count && r.data[left].priority > r.data[max].priority {
+	if left < r.count && less(r.data[max], r.data[left]) {
 		max = left
 	}
-	if right < r.count && r.data[right].priority > r.data[max].priority {
+	if right < r.count && less(r.data[max], r.data[right]) {
 		max = right
 	}
 	if max != i {
@@ -168,17 +189,24 @@ func rightChildIndex(i int) int {
 }
 
 func parentIndex(i int) int {
-	return i / 2
+	parent := ((i + 1) / 2) - 1
+	if parent < 0 {
+		return 0
+	}
+	return parent
 }
 
-func (r *RequestHeap) leftChild(i int) requestHeapNode {
-	return r.data[leftChildIndex(i)]
+func (r *RequestHeap) leftChild(i int) (int, requestHeapNode) {
+	lchild := leftChildIndex(i)
+	return lchild, r.data[lchild]
 }
 
-func (r *RequestHeap) rightChild(i int) requestHeapNode {
-	return r.data[rightChildIndex(i)]
+func (r *RequestHeap) rightChild(i int) (int, requestHeapNode) {
+	rchild := rightChildIndex(i)
+	return rchild, r.data[rchild]
 }
 
-func (r *RequestHeap) parent(i int) requestHeapNode {
-	return r.data[parentIndex(i)]
+func (r *RequestHeap) parent(i int) (int, requestHeapNode) {
+	parent := parentIndex(i)
+	return parent, r.data[parent]
 }
