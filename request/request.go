@@ -1,4 +1,4 @@
-package wander
+package request
 
 import (
 	"net/url"
@@ -18,21 +18,26 @@ func NewRequest(path string, parent *Request) (*Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !newURL.IsAbs() {
-		newURL.Scheme = parent.Scheme
-		newURL.Host = parent.Host
-	}
 
 	hostname := ""
 	depth := 0
 	if parent != nil {
+		if !newURL.IsAbs() {
+			newURL.Scheme = parent.Scheme
+			newURL.Host = parent.Host
+		}
+
 		hostname = parent.Hostname()
-		depth = parent.depth
+		depth = parent.depth + 1
 	}
 
 	return &Request{
 		newURL,
 		hostname,
-		depth + 1,
+		depth,
 	}, nil
+}
+
+func (r *Request) Depth() int {
+	return r.depth
 }

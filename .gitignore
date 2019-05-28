@@ -1,6 +1,7 @@
 # folders
 vendor/
 .vscode/
+cmd/
 
 # files
 *.lock
