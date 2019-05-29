@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/KillianMeersman/wander/request"
 )
@@ -103,8 +105,8 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 			parameter = strings.TrimPrefix(parts[1], " ")
 		}
 
-		switch directive {
-		case "User-agent":
+		switch strings.ToLower(directive) {
+		case "user-agent":
 			if parameter == "" {
 				return nil, fmt.Errorf("Invalid User-agent directive %s", line)
 			}
@@ -113,7 +115,7 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 			}
 			group = newRobotLimitGroup(parameter)
 
-		case "Disallow":
+		case "disallow":
 			if group == nil {
 				return nil, errors.New("Disallow directive without User-agent")
 			}
@@ -123,7 +125,7 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 				group.disallowed = append(group.disallowed, parameter)
 			}
 
-		case "Allow":
+		case "allow":
 			if group == nil {
 				return nil, errors.New("Allow directive without User-agent")
 			}
@@ -132,6 +134,23 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 			} else {
 				group.allowed = append(group.allowed, parameter)
 			}
+
+		case "crawl-delay":
+			dur, err := time.ParseDuration(fmt.Sprintf("%ss", parameter))
+			if err != nil {
+				return nil, err
+			}
+			if dur.Seconds() < 0 {
+				return nil, fmt.Errorf("negative crawl-delay not allowed")
+			}
+			group.delay = dur
+
+		case "sitemap":
+			url, err := url.Parse(parameter)
+			if err != nil {
+				return nil, err
+			}
+			group.sitemap = url
 
 		default:
 			return nil, fmt.Errorf("Unknown directive %s", line)
@@ -163,6 +182,7 @@ func (l *RobotLimits) Allowed(userAgent, url string) bool {
 }
 
 // GetLimits gets the RobotLimitGroup for the userAgent, returns the default (*) group if it was present and no other groups apply.
+// Returns nil if no groups apply and no default group was supplied.
 func (l *RobotLimits) GetLimits(userAgent string) *RobotLimitGroup {
 	for _, group := range l.groups {
 		if group.host == userAgent {
@@ -172,16 +192,47 @@ func (l *RobotLimits) GetLimits(userAgent string) *RobotLimitGroup {
 	return l.defaultLimits
 }
 
+// Delay returns the User-agent specific crawl-delay if it exists, otherwise the catch-all delay.
+// Returns def if neither a specific or global crawl-delay exist.
+func (l *RobotLimits) Delay(userAgent string, def time.Duration) time.Duration {
+	group := l.GetLimits(userAgent)
+	if group == nil {
+		return def
+	}
+	// replace default by default limit delay if it exists.
+	if l.defaultLimits != nil && l.defaultLimits.delay > -1 {
+		def = l.defaultLimits.delay
+	}
+	return group.Delay(def)
+}
+
+// Sitemap returns the URL to the sitemap for the given User-agent.
+// Returns the default sitemap if not User-agent specific sitemap was specified, otherwise nil.
+func (l *RobotLimits) Sitemap(userAgent string) *url.URL {
+	group := l.GetLimits(userAgent)
+	if group != nil {
+		return group.sitemap
+	}
+
+	if l.defaultLimits != nil && l.defaultLimits.sitemap != nil {
+		return l.defaultLimits.sitemap
+	}
+	return nil
+}
+
 // RobotLimitGroup holds the limits for a single user agent
 type RobotLimitGroup struct {
 	host       string
 	allowed    []string
 	disallowed []string
+	delay      time.Duration
+	sitemap    *url.URL
 }
 
 func newRobotLimitGroup(host string) *RobotLimitGroup {
 	return &RobotLimitGroup{
-		host: host,
+		host:  host,
+		delay: -1,
 	}
 }
 
@@ -203,4 +254,17 @@ func (g *RobotLimitGroup) Allowed(url string) bool {
 		}
 	}
 	return true
+}
+
+// Delay returns the Crawl-delay. Returns defs if no crawl delay was specified.
+func (g *RobotLimitGroup) Delay(def time.Duration) time.Duration {
+	if g.delay == -1 {
+		return def
+	}
+	return g.delay
+}
+
+// Sitemap returns the sitemap path.
+func (g *RobotLimitGroup) Sitemap() *url.URL {
+	return g.sitemap
 }

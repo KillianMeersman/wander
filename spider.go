@@ -196,8 +196,8 @@ func (s *Spider) RemoveLimits(limits ...limits.Limit) {
 }
 
 // SetThrottles sets or replaces the default and custom throttles for the spider.
-func (s *Spider) SetThrottles(def *limits.DefaultThrottle, throttles ...limits.Throttle) {
-	s.throttle = limits.NewThrottleCollection(def, throttles...)
+func (s *Spider) SetThrottles(def *limits.DefaultThrottle, domainThrottles ...*limits.DomainThrottle) {
+	s.throttle = limits.NewThrottleCollection(def, domainThrottles...)
 }
 
 // SetProxyFunc sets the proxy function to be used
@@ -435,15 +435,24 @@ func IgnoreRobotRules(s *Spider, req *request.Request) error {
 
 // FollowRobotRules fetches and follows the limitations imposed by the robots.txt file.
 func FollowRobotRules(s *Spider, req *request.Request) error {
-	group, err := s.RobotLimits.GetLimits(req.Host)
+	rules, err := s.RobotLimits.GetLimits(req.Host)
 	if err != nil {
-		group, err = s.GetRobotLimits(req)
+		rules, err = s.GetRobotLimits(req)
 		if err != nil {
 			return err
 		}
 	}
-	if !group.Allowed(s.UserAgent, req.Path) {
+
+	// check if the rules allow this request
+	if !rules.Allowed(s.UserAgent, req.Path) {
 		return fmt.Errorf("request for %s denied by robots.txt", req.String())
+	}
+
+	// check crawl-delay
+	delay := rules.Delay(s.UserAgent, -1)
+	if delay > -1 {
+		// override spider throttle for this domain with the given crawl delay
+		s.throttle.SetDomainThrottle(limits.NewDomainThrottle(req.Host, delay))
 	}
 	return nil
 }
