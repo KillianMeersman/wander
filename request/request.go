@@ -27,7 +27,7 @@ func NewRequest(path string, parent *Request) (*Request, error) {
 			newURL.Host = parent.Host
 		}
 
-		hostname = parent.Hostname()
+		hostname = parent.Host
 		depth = parent.depth + 1
 	}
 

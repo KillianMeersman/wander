@@ -6,7 +6,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-// Response is a wrapper around http.Response as well as an already parsed Goquery document
+// Response is a wrapper around http.Response.
 type Response struct {
 	Request *Request
 	*http.Response

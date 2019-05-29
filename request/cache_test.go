@@ -7,7 +7,7 @@ import (
 )
 
 func TestLocalRequestCache(t *testing.T) {
-	cache := request.NewRequestCache()
+	cache := request.NewCache()
 
 	requests, err := randomRequests(1000)
 	if err != nil {

@@ -68,7 +68,7 @@ func randomLinkServer() *http.Server {
 
 		# too many repeated hits, too quick
 		User-agent: Wander/0.1
-		Disallow: /someURL
+		Disallow: /test1
 
 		# Yahoo. too many repeated hits, too quick
 		User-agent: Slurp
@@ -103,7 +103,7 @@ func TestMain(m *testing.M) {
 }
 
 func BenchmarkSpider(b *testing.B) {
-	queue := request.NewRequestHeap(b.N)
+	queue := request.NewHeap(b.N)
 	spid, err := wander.NewSpider(
 		wander.AllowedDomains("127.0.0.1", "localhost"),
 		wander.Threads(2),
@@ -137,7 +137,7 @@ func BenchmarkSpider(b *testing.B) {
 				err := spid.Follow(link, res, 10-res.Request.Depth())
 				if err != nil {
 					switch err.(type) {
-					case *request.RequestQueueMaxSize:
+					case *request.QueueMaxSize:
 					default:
 						log.Fatal(err)
 					}

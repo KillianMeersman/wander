@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/KillianMeersman/wander/request"
 )
 
 // RobotParsingError signals the spider encountered an invalid robots.txt file.
@@ -16,6 +18,47 @@ type RobotParsingError struct {
 
 func (e *RobotParsingError) Error() string {
 	return fmt.Sprintf("Robots.txt for %s invalid: %s", e.Domain, e.Err)
+}
+
+// RobotLimitCache holds the robot exclusions for multiple domains.
+type RobotLimitCache struct {
+	limits map[string]*RobotLimits
+}
+
+func NewRobotLimitCache() *RobotLimitCache {
+	return &RobotLimitCache{
+		limits: make(map[string]*RobotLimits),
+	}
+}
+
+// Allowed returns true if the userAgent is allowed to access the given path on the given domain.
+// Returns error if no robot file is cached for the given domain.
+func (c *RobotLimitCache) Allowed(userAgent string, req *request.Request) (bool, error) {
+	limits, ok := c.limits[req.Host]
+	if !ok {
+		return false, fmt.Errorf("No limits found for domain %s", req.Host)
+	}
+	return limits.Allowed(userAgent, req.Path), nil
+}
+
+// GetLimits gets the limits for a host. Returns an error when no limits are cached for the given host.
+func (c *RobotLimitCache) GetLimits(host string) (*RobotLimits, error) {
+	limits, ok := c.limits[host]
+	if !ok {
+		return nil, fmt.Errorf("No limits found for domain %s", host)
+	}
+	return limits, nil
+}
+
+// AddLimits adds or replaces the limits for a host. Returns an error if the limits are invalid.
+func (c *RobotLimitCache) AddLimits(in io.Reader, host string) (*RobotLimits, error) {
+	limits, err := ParseRobotLimits(in)
+	if err != nil {
+		return nil, err
+	}
+
+	c.limits[host] = limits
+	return limits, nil
 }
 
 // RobotLimits holds all the limits imposed by a robots exclusion file.
