@@ -65,7 +65,8 @@ func NewHeap(maxSize int) *Heap {
 	return heap
 }
 
-func BuildRequestHeap(data []heapNode, maxSize int) *Heap {
+// BuildHeap builds a request heap from existing data.
+func BuildHeap(data []heapNode, maxSize int) *Heap {
 	lock := &sync.Mutex{}
 	heap := &Heap{
 		data:      data,
@@ -82,6 +83,7 @@ func BuildRequestHeap(data []heapNode, maxSize int) *Heap {
 	return heap
 }
 
+// Start starts the consumer goroutine. This method should be called before any calls to Dequeue.
 func (r *Heap) Start(ctx context.Context) {
 	if !r.inintalized {
 		r.outc = make(chan *Request)
@@ -120,7 +122,7 @@ func (r *Heap) Enqueue(req *Request, priority int) error {
 	return nil
 }
 
-// Dequeue a request.
+// Dequeue a request. The Dequeue channel is not closed when the context supplied to Start is cancelled.
 func (r *Heap) Dequeue() <-chan *Request {
 	return r.outc
 }

@@ -12,7 +12,7 @@ type Cache interface {
 	VisitedDomain(req *Request) bool
 }
 
-// LocalCache holds the visited urls in maps. Safe for use by multiple goroutines.
+// LocalCache holds urls in maps. Safe for use by multiple goroutines.
 type LocalCache struct {
 	requests map[*url.URL]struct{}
 	domains  map[string]struct{}

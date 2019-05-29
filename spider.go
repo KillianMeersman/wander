@@ -20,13 +20,14 @@ type ErrorPipeline func(err error)
 type SpiderConstructorOption func(s *Spider) error
 type RobotLimitFunction func(spid *Spider, req *request.Request) error
 
-//SpiderState holds a spider state after a crawl, allows a spider to resume a stopped crawl
+// SpiderState holds a spider's state, such as the request queue and cache.
+// It is returned by the Start and Resume methods, allows the Resume method to resume a previously stopped crawl.
 type SpiderState struct {
 	queue request.Queue
 	cache request.Cache
 }
 
-// Spider is the high level crawler
+// Spider provides a parallelized scraper.
 type Spider struct {
 	SpiderState
 	allowedDomains []*regexp.Regexp
@@ -42,8 +43,8 @@ type Spider struct {
 	client *http.Client
 
 	// options
-	UserAgent          string
-	RobotLimitFunction RobotLimitFunction
+	UserAgent              string
+	RobotExclusionFunction RobotLimitFunction
 
 	// callbacks
 	requestPipeline  RequestPipeline
@@ -51,7 +52,6 @@ type Spider struct {
 	errorPipeline    ErrorPipeline
 }
 
-// NewSpider return a new spider
 func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 	spider := &Spider{
 		SpiderState:    SpiderState{},
@@ -61,9 +61,9 @@ func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 		pipelineN: 1,
 		ingestorN: 1,
 
-		client:             &http.Client{},
-		UserAgent:          "Wander/0.1",
-		RobotLimitFunction: FollowRobotLimits,
+		client:                 &http.Client{},
+		UserAgent:              "Wander/0.1",
+		RobotExclusionFunction: FollowRobotRules,
 
 		responsePipeline: func(res *request.Response) {},
 		requestPipeline:  func(req *request.Request) {},
@@ -85,14 +85,14 @@ func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 	Constructor options
 */
 
-// AllowedDomains sets allowed domains, utility funtion for SetAllowedDomains
+// AllowedDomains sets allowed domains, utility funtion for SetAllowedDomains.
 func AllowedDomains(domains ...string) SpiderConstructorOption {
 	return func(s *Spider) error {
 		return s.SetAllowedDomains(domains...)
 	}
 }
 
-// Ingestors sets the amount of goroutines for ingestors
+// Ingestors sets the amount of goroutines for ingestors.
 func Ingestors(n int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.ingestorN = n
@@ -100,7 +100,7 @@ func Ingestors(n int) SpiderConstructorOption {
 	}
 }
 
-// Pipelines sets the amount of goroutines for callback functions
+// Pipelines sets the amount of goroutines for callback functions.
 func Pipelines(n int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.pipelineN = n
@@ -117,7 +117,7 @@ func Threads(n int) SpiderConstructorOption {
 	}
 }
 
-// ProxyFunc sets the proxy function, utility function for SetProxyFunc
+// ProxyFunc sets the proxy function, utility function for SetProxyFunc.
 func ProxyFunc(f func(r *http.Request) (*url.URL, error)) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.SetProxyFunc(f)
@@ -125,7 +125,7 @@ func ProxyFunc(f func(r *http.Request) (*url.URL, error)) SpiderConstructorOptio
 	}
 }
 
-// MaxDepth sets the maximum spider depth
+// MaxDepth sets the maximum request depth.
 func MaxDepth(max int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.AddLimits(limits.MaxDepth(max))
@@ -133,7 +133,8 @@ func MaxDepth(max int) SpiderConstructorOption {
 	}
 }
 
-// Queue sets the RequestQueue
+// Queue sets the RequestQueue.
+// Allows request queues to be shared between spiders.
 func Queue(queue request.Queue) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.queue = queue
@@ -141,7 +142,8 @@ func Queue(queue request.Queue) SpiderConstructorOption {
 	}
 }
 
-// Cache sets the RequestCache
+// Cache sets the RequestCache.
+// Allows request caches to be shared between spiders.
 func Cache(cache request.Cache) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.cache = cache
@@ -149,7 +151,7 @@ func Cache(cache request.Cache) SpiderConstructorOption {
 	}
 }
 
-// RobotLimits sets the RobotLimitCache.
+// RobotLimits sets the robot exclusion cache.
 func RobotLimits(limits *limits.RobotLimitCache) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.RobotLimits = limits
@@ -157,15 +159,15 @@ func RobotLimits(limits *limits.RobotLimitCache) SpiderConstructorOption {
 	}
 }
 
-// IgnoreRobots ignore robots.txt
+// IgnoreRobots sets the spider's RobotExclusionFunction to IgnoreRobotRules, ignoring robots.txt.
 func IgnoreRobots() SpiderConstructorOption {
 	return func(s *Spider) error {
-		s.RobotLimitFunction = IgnoreRobotLimits
+		s.RobotExclusionFunction = IgnoreRobotRules
 		return nil
 	}
 }
 
-// UserAgent set the spider User-agent
+// UserAgent set the spider User-agent.
 func UserAgent(agent string) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.UserAgent = agent
@@ -177,7 +179,7 @@ func UserAgent(agent string) SpiderConstructorOption {
 	Getters/setters
 */
 
-// AddLimits adds limits to the spider, deduplicates limits.
+// AddLimits adds limits to the spider, it will not add duplicate limits.
 func (s *Spider) AddLimits(limits ...limits.Limit) {
 	for _, limit := range limits {
 		contents, _ := json.Marshal(limit)
@@ -185,7 +187,7 @@ func (s *Spider) AddLimits(limits ...limits.Limit) {
 	}
 }
 
-// RemoveLimits removes the given limits
+// RemoveLimits removes the given limits (if present).
 func (s *Spider) RemoveLimits(limits ...limits.Limit) {
 	for _, limit := range limits {
 		contents, _ := json.Marshal(limit)
@@ -193,7 +195,7 @@ func (s *Spider) RemoveLimits(limits ...limits.Limit) {
 	}
 }
 
-// SetThrottles sets or replaces the default and custom throttles for the spider
+// SetThrottles sets or replaces the default and custom throttles for the spider.
 func (s *Spider) SetThrottles(def *limits.DefaultThrottle, throttles ...limits.Throttle) {
 	s.throttle = limits.NewThrottleCollection(def, throttles...)
 }
@@ -242,7 +244,8 @@ func (s *Spider) OnError(efunc ErrorPipeline) {
 	Control/navigation functions
 */
 
-// Visit a page by adding the path to the queue, blocks when the queue is full until there is free space
+// Visit a page by adding the path to the queue, blocks when the queue is full until there is free space.
+// This method is meant to be used solely for setting the starting points of crawls before calling Start.
 func (s *Spider) Visit(path string) error {
 	req, err := request.NewRequest(path, nil)
 	if err != nil {
@@ -329,7 +332,7 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 	return &s.SpiderState
 }
 
-// Resume from spider state
+// Resume from spider state, blocks while the spider is running. Returns the spider state after context is cancelled.
 func (s *Spider) Resume(ctx context.Context, state *SpiderState) *SpiderState {
 	s.SpiderState = *state
 	return s.Start(ctx)
@@ -377,6 +380,7 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 }
 
 // GetRobotLimits downloads and parses the robots.txt file for a domain.
+// Respects the spider throttles.
 func (s *Spider) GetRobotLimits(req *request.Request) (*limits.RobotLimits, error) {
 	s.throttle.Wait(req)
 	res, err := s.client.Get(fmt.Sprintf("%s://%s/robots.txt", req.Scheme, req.Host))
@@ -405,7 +409,7 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 	}
 
 	// check robots.txt
-	err := s.RobotLimitFunction(s, req)
+	err := s.RobotExclusionFunction(s, req)
 	if err != nil {
 		return err
 	}
@@ -425,13 +429,13 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 	Robots.txt interpretation functions
 */
 
-// IgnoreRobotLimits ignores the robots.txt file.
-func IgnoreRobotLimits(s *Spider, req *request.Request) error {
+// IgnoreRobotRules ignores the robots.txt file.
+func IgnoreRobotRules(s *Spider, req *request.Request) error {
 	return nil
 }
 
-// FollowRobotLimits fetches and follows the robots.txt file.
-func FollowRobotLimits(s *Spider, req *request.Request) error {
+// FollowRobotRules fetches and follows the limitations imposed by the robots.txt file.
+func FollowRobotRules(s *Spider, req *request.Request) error {
 	group, err := s.RobotLimits.GetLimits(req.Host)
 	if err != nil {
 		group, err = s.GetRobotLimits(req)
