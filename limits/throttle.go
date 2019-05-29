@@ -21,16 +21,22 @@ type ThrottleCollection struct {
 
 func NewThrottleCollection(defaultCollector *DefaultThrottle, domainThrottles ...*DomainThrottle) ThrottleCollection {
 
-	return ThrottleCollection{
+	col := ThrottleCollection{
 		defaultThrottle: defaultCollector,
 		domainThrottles: make(map[string]*DomainThrottle),
 	}
+
+	for _, domainThrottle := range domainThrottles {
+		col.domainThrottles[domainThrottle.domain] = domainThrottle
+	}
+
+	return col
 }
 
 // Wait blocks until the most approprate timer has ticked over.
 func (t *ThrottleCollection) Wait(req *request.Request) {
 	// check domain specific throttles
-	throttle, ok := t.domainThrottles[req.String()]
+	throttle, ok := t.domainThrottles[req.Host]
 	if ok {
 		throttle.Wait()
 		return
