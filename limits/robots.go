@@ -8,14 +8,24 @@ import (
 	"strings"
 )
 
+// RobotParsingError signals the spider encountered an invalid robots.txt file.
+type RobotParsingError struct {
+	Domain string
+	Err    string
+}
+
+func (e *RobotParsingError) Error() string {
+	return fmt.Sprintf("Robots.txt for %s invalid: %s", e.Domain, e.Err)
+}
+
 type RobotLimits struct {
 	defaultLimits *RobotLimitGroup
-	groups        []*RobotLimitGroup
+	groups        map[string]*RobotLimitGroup
 }
 
 func newRobotLimits() *RobotLimits {
 	return &RobotLimits{
-		groups: make([]*RobotLimitGroup, 0),
+		groups: make(map[string]*RobotLimitGroup, 0),
 	}
 }
 
@@ -24,14 +34,14 @@ func (l *RobotLimits) addLimitGroup(g *RobotLimitGroup) {
 		l.defaultLimits = g
 		return
 	}
-	l.groups = append(l.groups, g)
+	l.groups[g.host] = g
 }
 
+// Allowed returns true if the user agent is allowed to access the given url.
 func (l *RobotLimits) Allowed(userAgent, url string) bool {
-	for _, group := range l.groups {
-		if group.Applies(userAgent) {
-			return group.Allowed(url)
-		}
+	group, ok := l.groups[userAgent]
+	if ok {
+		return group.Allowed(url)
 	}
 	if l.defaultLimits != nil {
 		return l.defaultLimits.Allowed(url)
@@ -56,28 +66,27 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 			continue
 		}
 
+		// separate directive and parameter
 		parts := strings.Split(line, ":")
 		if len(parts) < 1 {
 			return nil, fmt.Errorf("Invalid directive %s", line)
 		}
-		directive := parts[0]
+		directive := strings.Trim(parts[0], " \t")
 		parameter := ""
 		if len(parts) > 1 {
-			parameter = parts[1]
-			if strings.HasPrefix(parameter, " ") {
-				parameter = strings.Replace(parameter, " ", "", 1)
-			}
+			parameter = strings.Trim(parts[1], " \t")
 		}
 
 		switch directive {
 		case "User-agent":
-			if len(parts) < 2 {
-				return nil, fmt.Errorf("Invalid directive %s", line)
+			if parameter == "" {
+				return nil, fmt.Errorf("Invalid User-agent directive %s", line)
 			}
 			if group != nil {
 				limits.addLimitGroup(group)
 			}
 			group = newRobotLimitGroup(parameter)
+
 		case "Disallow":
 			if group == nil {
 				return nil, errors.New("Disallow directive without User-agent")
@@ -97,6 +106,10 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 			} else {
 				group.allowed = append(group.allowed, parameter)
 			}
+
+		case "":
+			continue
+
 		default:
 			return nil, fmt.Errorf("Unknown directive %s", line)
 		}
@@ -106,6 +119,7 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 	return limits, nil
 }
 
+// GetLimits gets the RobotLimitGroup for the userAgent, returns the default (*) group if it was present and no other groups apply.
 func (l *RobotLimits) GetLimits(userAgent string) *RobotLimitGroup {
 	for _, group := range l.groups {
 		if group.host == userAgent {
@@ -128,10 +142,12 @@ func newRobotLimitGroup(host string) *RobotLimitGroup {
 	}
 }
 
-func (g *RobotLimitGroup) Applies(host string) bool {
-	return g.host == host
+// Applies returns true if the group applies to the given userAgent
+func (g *RobotLimitGroup) Applies(userAgent string) bool {
+	return g.host == userAgent
 }
 
+// Allowed returns true if the url is allowed by the group rules. Check if the group applies to the user agent first by using Applies.
 func (g *RobotLimitGroup) Allowed(url string) bool {
 	for _, allowed := range g.allowed {
 		if strings.HasPrefix(url, allowed) {

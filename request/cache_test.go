@@ -19,7 +19,7 @@ func TestLocalRequestCache(t *testing.T) {
 	}
 
 	for _, req := range requests {
-		if !cache.Visited(req) {
+		if !cache.VisitedURL(req) {
 			t.Fatal("request not in cache")
 		}
 	}
@@ -28,7 +28,7 @@ func TestLocalRequestCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cache.Visited(req[0]) {
+	if cache.VisitedURL(req[0]) {
 		t.Fatal("request in cache when it shouldn't be")
 	}
 

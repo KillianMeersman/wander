@@ -33,8 +33,11 @@ type SpiderState struct {
 type Spider struct {
 	SpiderState
 	allowedDomains []*regexp.Regexp
+	robotRules     map[string]*limits.RobotLimits
+	ignoreRobots   bool
 	limits         map[string]limits.Limit
 	throttle       limits.ThrottleCollection
+	userAgent      string
 
 	// parallelism
 	ingestorN int
@@ -54,7 +57,10 @@ func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 	spider := &Spider{
 		SpiderState:    SpiderState{},
 		allowedDomains: make([]*regexp.Regexp, 0),
+		robotRules:     make(map[string]*limits.RobotLimits),
+		ignoreRobots:   false,
 		limits:         make(map[string]limits.Limit),
+		userAgent:      "Wander/0.1",
 		pipelineN:      1,
 		ingestorN:      1,
 		client:         &http.Client{},
@@ -138,6 +144,20 @@ func Queue(queue request.RequestQueue) func(s *Spider) error {
 func Cache(cache request.RequestCache) func(s *Spider) error {
 	return func(s *Spider) error {
 		s.cache = cache
+		return nil
+	}
+}
+
+func IgnoreRobots() func(s *Spider) error {
+	return func(s *Spider) error {
+		s.ignoreRobots = true
+		return nil
+	}
+}
+
+func UserAgent(agent string) func(s *Spider) error {
+	return func(s *Spider) error {
+		s.userAgent = agent
 		return nil
 	}
 }
@@ -321,6 +341,24 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 	return doc, nil
 }
 
+func (s *Spider) getRobotRules(req *request.Request) error {
+	s.throttle.Wait(req)
+	res, err := s.client.Get(fmt.Sprintf("%s://%s:%s/robots.txt", req.Scheme, req.Hostname(), req.Port()))
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	rules, err := limits.ParseRobotLimits(res.Body)
+	if err != nil {
+		return &limits.RobotParsingError{
+			Domain: req.Hostname(),
+			Err:    err.Error(),
+		}
+	}
+	s.robotRules[req.Hostname()] = rules
+	return nil
+}
+
 func (s *Spider) addRequest(req *request.Request, priority int) error {
 	for _, limit := range s.limits {
 		err := limit.FilterRequest(req)
@@ -329,7 +367,22 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 		}
 	}
 
-	if !s.cache.Visited(req) {
+	// check robots.txt
+	if !s.ignoreRobots {
+		rules, ok := s.robotRules[req.Hostname()]
+		if !ok {
+			err := s.getRobotRules(req)
+			if err != nil {
+				return err
+			}
+			rules = s.robotRules[req.Hostname()]
+		}
+		if !rules.Allowed(s.userAgent, req.Path) {
+			return fmt.Errorf("request for %s denied by robots.txt", req.String())
+		}
+	}
+
+	if !s.cache.VisitedURL(req) {
 		s.cache.AddRequest(req)
 		err := s.queue.Enqueue(req, priority)
 		if err != nil {

@@ -44,47 +44,78 @@ func (h *RegexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// no pattern matched; send 404 response
 	http.NotFound(w, r)
 }
+
 func randomLinkServer() *http.Server {
 
-	handleFunc := func(w http.ResponseWriter, r *http.Request) {
-		msg := []byte(fmt.Sprintf(`<html><head>
+	randomLinks := func(w http.ResponseWriter, r *http.Request) {
+		msg := []byte(fmt.Sprintf(`
+		<html>
+		<head>
 		</head>
 		<body>
-		<a href="/%s">test</a>
-		<a href="/%s">test</a>
-		<a href="/%s">test</a>
+		<a href="/test/%s">test1</a>
+		<a href="/test/%s">test2</a>
+		<a href="/test/%s">test3</a>
 		</body>
 		</html>`, util.RandomString(20), util.RandomString(20), util.RandomString(20)))
 
 		w.Write(msg)
 	}
+	robots := func(w http.ResponseWriter, r *http.Request) {
+		msg := []byte(`User-agent: *
+Disallow:
+
+# too many repeated hits, too quick
+User-agent: Wander/0.1
+Disallow: /someURL
+
+# Yahoo. too many repeated hits, too quick
+User-agent: Slurp
+Disallow: /
+Allow: /test
+
+# too many repeated hits, too quick
+User-agent: Baidu
+Disallow: /`)
+
+		w.Write(msg)
+	}
 
 	handler := &RegexpHandler{}
-	handler.HandleFunc(regexp.MustCompile(".*"), handleFunc)
+	handler.HandleFunc(regexp.MustCompile(`(?m)^\/robots\.txt$`), robots)
+	handler.HandleFunc(regexp.MustCompile(`(?m)^\/test.*`), randomLinks)
+
 	serv := &http.Server{
 		Addr:    "127.0.0.1:8080",
 		Handler: handler,
 	}
-	go serv.ListenAndServe()
 	return serv
+}
+
+func TestMain(m *testing.M) {
+	ctx := context.Background()
+	serv := randomLinkServer()
+	go serv.ListenAndServe()
+	defer serv.Shutdown(ctx)
+	m.Run()
 }
 
 func BenchmarkSpider(b *testing.B) {
 	queue := request.NewRequestHeap(10000)
 	spid, err := wander.NewSpider(
-		wander.AllowedDomains("127.0.0.1"),
-		wander.Threads(1),
+		wander.AllowedDomains("127.0.0.1", "localhost"),
+		wander.Threads(2),
 		wander.Queue(queue),
 	)
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	ctx, stop := context.WithCancel(context.Background())
 	reqn := 0
 	resn := 0
 	resLock := sync.Mutex{}
 	reqLock := sync.Mutex{}
+	ctx, stop := context.WithCancel(context.Background())
 
 	spid.OnResponse(func(res *request.Response) {
 		resLock.Lock()
@@ -123,11 +154,6 @@ func BenchmarkSpider(b *testing.B) {
 		reqLock.Unlock()
 	})
 
-	err = spid.Visit("http://127.0.0.1:8080/")
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	sigintc := make(chan os.Signal, 1)
 	signal.Notify(sigintc, os.Interrupt)
 	go func() {
@@ -135,9 +161,12 @@ func BenchmarkSpider(b *testing.B) {
 		stop()
 	}()
 
-	serv := randomLinkServer()
+	b.ResetTimer()
+	err = spid.Visit("http://localhost:8080/test/")
+	if err != nil {
+		log.Fatal(err)
+	}
 	spid.Start(ctx)
-	serv.Shutdown(ctx)
 
 	b.Logf("Visited %d, received %d responses. Queue size is %d", reqn, resn, queue.Count())
 }
