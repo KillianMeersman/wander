@@ -1,34 +1,18 @@
 package request_test
 
 import (
-	"context"
 	"fmt"
-	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/KillianMeersman/wander/request"
+	"github.com/KillianMeersman/wander/util"
 )
-
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
-func randomString(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letterRunes[rand.Intn(len(letterRunes))]
-	}
-	return string(b)
-}
 
 func randomRequests(n int) ([]*request.Request, error) {
 	requests := make([]*request.Request, n)
 	var parent *request.Request = nil
 	for i := 0; i < n; i++ {
-		req, err := request.NewRequest(fmt.Sprintf("http://%s", randomString(50)), parent)
+		req, err := request.NewRequest(fmt.Sprintf("http://%s", util.RandomString(50)), parent)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +33,7 @@ func TestRequestHeapEqualPriority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	heap := request.NewRequestHeap(10000)
+	heap := request.NewHeap(10000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,15 +45,10 @@ func TestRequestHeapEqualPriority(t *testing.T) {
 		}
 	}
 
-	ctx := context.Background()
-	i := 0
-	for req := range heap.Dequeue(ctx) {
-		if req != requests[i] {
+	for _, a := range requests {
+		b, _ := heap.Dequeue()
+		if a != b {
 			t.Fatal("requests dequeued in incorrect order")
-		}
-		i++
-		if heap.Count() < 1 {
-			break
 		}
 	}
 }
@@ -80,7 +59,7 @@ func TestRequestHeapDifferentPriority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	heap := request.NewRequestHeap(10000)
+	heap := request.NewHeap(1001)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,15 +71,10 @@ func TestRequestHeapDifferentPriority(t *testing.T) {
 		}
 	}
 
-	ctx := context.Background()
-	i := 999
-	for req := range heap.Dequeue(ctx) {
+	for i := 999; i >= 0; i-- {
+		req, _ := heap.Dequeue()
 		if req != requests[i] {
 			t.Fatal("requests dequeued in incorrect order")
-		}
-		i--
-		if heap.Count() < 1 {
-			break
 		}
 	}
 }

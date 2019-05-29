@@ -14,25 +14,24 @@ import (
 	"github.com/KillianMeersman/wander/request"
 )
 
-// RequestFunc callback for requests
-type RequestFunc func(req *request.Request)
+type RequestPipeline func(req *request.Request)
+type ResponsePipeline func(res *request.Response)
+type ErrorPipeline func(err error)
+type SpiderConstructorOption func(s *Spider) error
+type RobotLimitFunction func(spid *Spider, req *request.Request) error
 
-// ResponseFunc callback for responses
-type ResponseFunc func(res *request.Response)
-
-// ErrorFunc callback for errors
-type ErrorFunc func(err error)
-
-//SpiderState holds a spider state after a crawl, allows a spider to resume a stopped crawl
+// SpiderState holds a spider's state, such as the request queue and cache.
+// It is returned by the Start and Resume methods, allows the Resume method to resume a previously stopped crawl.
 type SpiderState struct {
-	queue request.RequestQueue
-	cache *sync.Map
+	queue request.Queue
+	cache request.Cache
 }
 
-// Spider is the high level crawler
+// Spider provides a parallelized scraper.
 type Spider struct {
 	SpiderState
 	allowedDomains []*regexp.Regexp
+	RobotLimits    *limits.RobotLimitCache
 	limits         map[string]limits.Limit
 	throttle       limits.ThrottleCollection
 
@@ -43,27 +42,32 @@ type Spider struct {
 	// http
 	client *http.Client
 
+	// options
+	UserAgent              string
+	RobotExclusionFunction RobotLimitFunction
+
 	// callbacks
-	requestFunc  RequestFunc
-	responseFunc ResponseFunc
-	errFunc      ErrorFunc
+	requestPipeline  RequestPipeline
+	responsePipeline ResponsePipeline
+	errorPipeline    ErrorPipeline
 }
 
-// NewSpider return a new spider
 func NewSpider(options ...func(*Spider) error) (*Spider, error) {
-	state := SpiderState{
-		cache: &sync.Map{},
-	}
 	spider := &Spider{
-		SpiderState:    state,
+		SpiderState:    SpiderState{},
 		allowedDomains: make([]*regexp.Regexp, 0),
 		limits:         make(map[string]limits.Limit),
-		pipelineN:      1,
-		ingestorN:      1,
-		client:         &http.Client{},
-		responseFunc:   func(res *request.Response) {},
-		requestFunc:    func(req *request.Request) {},
-		errFunc:        func(err error) {},
+
+		pipelineN: 1,
+		ingestorN: 1,
+
+		client:                 &http.Client{},
+		UserAgent:              "Wander/0.1",
+		RobotExclusionFunction: FollowRobotRules,
+
+		responsePipeline: func(res *request.Response) {},
+		requestPipeline:  func(req *request.Request) {},
+		errorPipeline:    func(err error) {},
 	}
 
 	for _, option := range options {
@@ -81,23 +85,23 @@ func NewSpider(options ...func(*Spider) error) (*Spider, error) {
 	Constructor options
 */
 
-// AllowedDomains sets allowed domains, utility funtion for SetAllowedDomains
-func AllowedDomains(domains ...string) func(s *Spider) error {
+// AllowedDomains sets allowed domains, utility funtion for SetAllowedDomains.
+func AllowedDomains(domains ...string) SpiderConstructorOption {
 	return func(s *Spider) error {
 		return s.SetAllowedDomains(domains...)
 	}
 }
 
-// Ingestors sets the amount of goroutines for ingestors
-func Ingestors(n int) func(s *Spider) error {
+// Ingestors sets the amount of goroutines for ingestors.
+func Ingestors(n int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.ingestorN = n
 		return nil
 	}
 }
 
-// Pipelines sets the amount of goroutines for callback functions
-func Pipelines(n int) func(s *Spider) error {
+// Pipelines sets the amount of goroutines for callback functions.
+func Pipelines(n int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.pipelineN = n
 		return nil
@@ -105,7 +109,7 @@ func Pipelines(n int) func(s *Spider) error {
 }
 
 // Threads sets the amount of ingestors and pipelines to n, spawning a total of n*2 goroutines.
-func Threads(n int) func(s *Spider) error {
+func Threads(n int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.ingestorN = n
 		s.pipelineN = n
@@ -113,31 +117,69 @@ func Threads(n int) func(s *Spider) error {
 	}
 }
 
-// ProxyFunc sets the proxy function, utility function for SetProxyFunc
-func ProxyFunc(f func(r *http.Request) (*url.URL, error)) func(s *Spider) error {
+// ProxyFunc sets the proxy function, utility function for SetProxyFunc.
+func ProxyFunc(f func(r *http.Request) (*url.URL, error)) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.SetProxyFunc(f)
 		return nil
 	}
 }
 
-// MaxDepth sets the maximum spider depth
-func MaxDepth(max int) func(s *Spider) error {
+// MaxDepth sets the maximum request depth.
+func MaxDepth(max int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.AddLimits(limits.MaxDepth(max))
 		return nil
 	}
 }
 
-// Queue sets the RequestQueue
-func Queue(queue request.RequestQueue) func(s *Spider) error {
+// Queue sets the RequestQueue.
+// Allows request queues to be shared between spiders.
+func Queue(queue request.Queue) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.queue = queue
 		return nil
 	}
 }
 
-// AddLimits adds limits to the spider, deduplicates limits.
+// Cache sets the RequestCache.
+// Allows request caches to be shared between spiders.
+func Cache(cache request.Cache) SpiderConstructorOption {
+	return func(s *Spider) error {
+		s.cache = cache
+		return nil
+	}
+}
+
+// RobotLimits sets the robot exclusion cache.
+func RobotLimits(limits *limits.RobotLimitCache) SpiderConstructorOption {
+	return func(s *Spider) error {
+		s.RobotLimits = limits
+		return nil
+	}
+}
+
+// IgnoreRobots sets the spider's RobotExclusionFunction to IgnoreRobotRules, ignoring robots.txt.
+func IgnoreRobots() SpiderConstructorOption {
+	return func(s *Spider) error {
+		s.RobotExclusionFunction = IgnoreRobotRules
+		return nil
+	}
+}
+
+// UserAgent set the spider User-agent.
+func UserAgent(agent string) SpiderConstructorOption {
+	return func(s *Spider) error {
+		s.UserAgent = agent
+		return nil
+	}
+}
+
+/*
+	Getters/setters
+*/
+
+// AddLimits adds limits to the spider, it will not add duplicate limits.
 func (s *Spider) AddLimits(limits ...limits.Limit) {
 	for _, limit := range limits {
 		contents, _ := json.Marshal(limit)
@@ -145,7 +187,7 @@ func (s *Spider) AddLimits(limits ...limits.Limit) {
 	}
 }
 
-// RemoveLimits removes the given limits
+// RemoveLimits removes the given limits (if present).
 func (s *Spider) RemoveLimits(limits ...limits.Limit) {
 	for _, limit := range limits {
 		contents, _ := json.Marshal(limit)
@@ -153,7 +195,7 @@ func (s *Spider) RemoveLimits(limits ...limits.Limit) {
 	}
 }
 
-// SetThrottles sets or replaces the default and custom throttles for the spider
+// SetThrottles sets or replaces the default and custom throttles for the spider.
 func (s *Spider) SetThrottles(def *limits.DefaultThrottle, throttles ...limits.Throttle) {
 	s.throttle = limits.NewThrottleCollection(def, throttles...)
 }
@@ -179,29 +221,38 @@ func (s *Spider) SetAllowedDomains(paths ...string) error {
 	return nil
 }
 
-// OnResponse is called when a response has been received and tokenized
-func (s *Spider) OnResponse(pfunc ResponseFunc) {
-	s.responseFunc = pfunc
+/*
+	Pipeline functions
+*/
+
+// OnRequest is called when a request is about to be made.
+func (s *Spider) OnRequest(vfunc RequestPipeline) {
+	s.requestPipeline = vfunc
 }
 
-// OnError is called on errors
-func (s *Spider) OnError(efunc ErrorFunc) {
-	s.errFunc = efunc
+// OnResponse is called when a response has been received and tokenized.
+func (s *Spider) OnResponse(pfunc ResponsePipeline) {
+	s.responsePipeline = pfunc
 }
 
-// OnRequest is called when a request is about to be made
-func (s *Spider) OnRequest(vfunc RequestFunc) {
-	s.requestFunc = vfunc
+// OnError is called when an error is encountered.
+func (s *Spider) OnError(efunc ErrorPipeline) {
+	s.errorPipeline = efunc
 }
 
-// Visit a page by adding the path to the queue, blocks when the queue is full until there is free space
+/*
+	Control/navigation functions
+*/
+
+// Visit a page by adding the path to the queue, blocks when the queue is full until there is free space.
+// This method is meant to be used solely for setting the starting points of crawls before calling Start.
 func (s *Spider) Visit(path string) error {
 	req, err := request.NewRequest(path, nil)
 	if err != nil {
 		return err
 	}
 
-	return s.addRequest(req, 100000000000000000)
+	return s.addRequest(req, int(^uint(0)>>1))
 }
 
 // Follow a link by adding the path to the queue, blocks when the queue is full until there is free space.
@@ -234,21 +285,22 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 				case <-ctx.Done():
 					ingestors.Done()
 					return
+				default:
+				}
 
-				case req := <-s.queue.Dequeue(ctx):
+				req, ok := s.queue.Dequeue()
+				if ok {
 					if s.filterDomains(req) {
 						s.throttle.Wait(req)
 						reqc <- req
-
 						res, err := s.getResponse(req)
 						if err != nil {
 							errc <- err
 							continue
 						}
 						resc <- res
-
 					} else {
-						s.errFunc(fmt.Errorf("domain %s filtered", req.String()))
+						s.errorPipeline(fmt.Errorf("domain %s filtered", req.String()))
 					}
 				}
 			}
@@ -260,11 +312,11 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 			for {
 				select {
 				case req := <-reqc:
-					s.requestFunc(req)
+					s.requestPipeline(req)
 				case res := <-resc:
-					s.responseFunc(res)
+					s.responsePipeline(res)
 				case err := <-errc:
-					s.errFunc(err)
+					s.errorPipeline(err)
 				case <-pipelinesCtx.Done():
 					pipelines.Done()
 					return
@@ -279,27 +331,40 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 	return &s.SpiderState
 }
 
-// Resume from spider state
+// Resume from spider state, blocks while the spider is running. Returns the spider state after context is cancelled.
 func (s *Spider) Resume(ctx context.Context, state *SpiderState) *SpiderState {
 	s.SpiderState = *state
 	return s.Start(ctx)
 }
 
+/*
+	Private methods
+*/
+
+// init sets some spider fields to default values if none were supplied.
 func (s *Spider) init() {
 	if s.queue == nil {
-		s.queue = request.NewRequestHeap(10000)
+		s.queue = request.NewHeap(10000)
+	}
+	if s.cache == nil {
+		s.cache = request.NewCache()
+	}
+	if s.RobotLimits == nil {
+		s.RobotLimits = limits.NewRobotLimitCache()
 	}
 }
 
+// filterDomains returns true if the spider is allowed to visit the domain.
 func (s *Spider) filterDomains(request *request.Request) bool {
 	for _, domain := range s.allowedDomains {
-		if domain.MatchString(request.Hostname()) {
+		if domain.MatchString(request.Host) {
 			return true
 		}
 	}
 	return false
 }
 
+// getResponse waits for throttles and makes a GET request.
 func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 	res, err := s.client.Get(req.String())
 	if err != nil {
@@ -313,6 +378,27 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 	return doc, nil
 }
 
+// GetRobotLimits downloads and parses the robots.txt file for a domain.
+// Respects the spider throttles.
+func (s *Spider) GetRobotLimits(req *request.Request) (*limits.RobotLimits, error) {
+	s.throttle.Wait(req)
+	res, err := s.client.Get(fmt.Sprintf("%s://%s/robots.txt", req.Scheme, req.Host))
+	if err != nil {
+		return nil, err
+	}
+
+	domainLimits, err := s.RobotLimits.AddLimits(res.Body, req.Host)
+	defer res.Body.Close()
+	if err != nil {
+		return nil, &limits.RobotParsingError{
+			Domain: req.Host,
+			Err:    err.Error(),
+		}
+	}
+	return domainLimits, nil
+}
+
+// addRequest adds a request to the queue.
 func (s *Spider) addRequest(req *request.Request, priority int) error {
 	for _, limit := range s.limits {
 		err := limit.FilterRequest(req)
@@ -321,12 +407,43 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 		}
 	}
 
-	if _, ok := s.cache.Load(req.URL.String()); !ok {
-		s.cache.Store(req.URL.String(), struct{}{})
+	// check robots.txt
+	err := s.RobotExclusionFunction(s, req)
+	if err != nil {
+		return err
+	}
+
+	// check cache to prevent URL revisit
+	if !s.cache.VisitedURL(req) {
+		s.cache.AddRequest(req)
 		err := s.queue.Enqueue(req, priority)
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+/*
+	Robots.txt interpretation functions
+*/
+
+// IgnoreRobotRules ignores the robots.txt file.
+func IgnoreRobotRules(s *Spider, req *request.Request) error {
+	return nil
+}
+
+// FollowRobotRules fetches and follows the limitations imposed by the robots.txt file.
+func FollowRobotRules(s *Spider, req *request.Request) error {
+	group, err := s.RobotLimits.GetLimits(req.Host)
+	if err != nil {
+		group, err = s.GetRobotLimits(req)
+		if err != nil {
+			return err
+		}
+	}
+	if !group.Allowed(s.UserAgent, req.Path) {
+		return fmt.Errorf("request for %s denied by robots.txt", req.String())
 	}
 	return nil
 }

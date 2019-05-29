@@ -1,33 +1,33 @@
 package request
 
 import (
-	"context"
 	"fmt"
 	"sync"
 )
 
-// RequestQueue is a priorized FIFO queue for Requests
-type RequestQueue interface {
+// Queue is a prioritized FIFO queue for requests
+type Queue interface {
 	Enqueue(req *Request, priority int) error
-	Dequeue(ctx context.Context) <-chan *Request
+	Dequeue() (*Request, bool)
 	Count() int
 }
 
-type RequestQueueMaxSize struct {
+// QueueMaxSize signals the Queue has reached its maximum size.
+type QueueMaxSize struct {
 	size int
 }
 
-func (r RequestQueueMaxSize) Error() string {
+func (r QueueMaxSize) Error() string {
 	return fmt.Sprintf("Request queue has reached maximum size of %d", r.size)
 }
 
-type requestHeapNode struct {
+type heapNode struct {
 	priority       int
 	insertionCount int
 	request        *Request
 }
 
-func less(a, b requestHeapNode) bool {
+func less(a, b heapNode) bool {
 	if a.priority < b.priority {
 		return true
 	}
@@ -39,38 +39,29 @@ func less(a, b requestHeapNode) bool {
 	return false
 }
 
-type RequestHeap struct {
-	data           []requestHeapNode
+// Heap is a heap implementation for request.Queue.
+type Heap struct {
+	data           []heapNode
 	count          int
 	maxSize        int
-	lock           *sync.Mutex
-	available      *sync.Cond
-	outc           chan *Request
-	inintalized    bool
 	insertionCount int
+	lock           *sync.Mutex
 }
 
-func NewRequestHeap(maxSize int) *RequestHeap {
+// NewHeap returns a request heap (priority queue).
+func NewHeap(maxSize int) *Heap {
 	lock := &sync.Mutex{}
-	heap := &RequestHeap{
-		data:      make([]requestHeapNode, maxSize/10),
-		maxSize:   maxSize,
-		lock:      lock,
-		available: sync.NewCond(lock),
-		outc:      make(chan *Request),
+	heap := &Heap{
+		data:    make([]heapNode, maxSize/10),
+		maxSize: maxSize,
+		lock:    lock,
 	}
 	return heap
 }
 
-func BuildRequestHeap(data []requestHeapNode, maxSize int) *RequestHeap {
-	lock := &sync.Mutex{}
-	heap := &RequestHeap{
-		data:      data,
-		maxSize:   maxSize,
-		lock:      lock,
-		available: sync.NewCond(lock),
-		outc:      make(chan *Request),
-	}
+// BuildHeap builds a request heap from existing data.
+func BuildHeap(data []heapNode, maxSize int) *Heap {
+	heap := NewHeap(maxSize)
 
 	for i := len(data) / 2; i >= 0; i-- {
 		heap.maxHeapify(i)
@@ -79,7 +70,8 @@ func BuildRequestHeap(data []requestHeapNode, maxSize int) *RequestHeap {
 	return heap
 }
 
-func (r *RequestHeap) Enqueue(req *Request, priority int) error {
+// Enqueue a request with the given priority.
+func (r *Heap) Enqueue(req *Request, priority int) error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -87,41 +79,35 @@ func (r *RequestHeap) Enqueue(req *Request, priority int) error {
 	if err != nil {
 		return err
 	}
-	r.available.Broadcast()
+
 	return nil
 }
 
-func (r *RequestHeap) Dequeue(ctx context.Context) <-chan *Request {
-	if !r.inintalized {
-		go func() {
-			for {
-				r.lock.Lock()
-				for r.count < 1 {
-					r.available.Wait()
-				}
-				req := r.extract()
-				r.lock.Unlock()
+// Dequeue a request.
+func (r *Heap) Dequeue() (*Request, bool) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 
-				select {
-				case r.outc <- req:
-				case <-ctx.Done():
-					return
-				}
-
-			}
-		}()
-		r.inintalized = true
+	if r.count > 0 {
+		return r.extract(), true
 	}
-
-	return r.outc
+	return nil, false
 }
 
-func (r *RequestHeap) Count() int {
+// Peek returns the next request without removing it from the queue.
+func (r *Heap) Peek() *Request {
+	return r.data[0].request
+}
+
+// Count returns the amount of requests in the queue.
+// Returns nil when no requests are in the heap.
+func (r *Heap) Count() int {
 	return r.count
 }
 
-func (r *RequestHeap) insert(req *Request, priority int) error {
-	node := requestHeapNode{
+// insert a request.
+func (r *Heap) insert(req *Request, priority int) error {
+	node := heapNode{
 		priority:       priority,
 		request:        req,
 		insertionCount: r.insertionCount + 1,
@@ -131,11 +117,11 @@ func (r *RequestHeap) insert(req *Request, priority int) error {
 		newSize := (len(r.data) * 2) + 1
 		if newSize > r.maxSize {
 			if r.count == r.maxSize {
-				return &RequestQueueMaxSize{size: r.maxSize}
+				return &QueueMaxSize{size: r.maxSize}
 			}
 			newSize = r.maxSize
 		}
-		data := make([]requestHeapNode, newSize)
+		data := make([]heapNode, newSize)
 		copy(data, r.data)
 		r.data = data
 	}
@@ -155,7 +141,8 @@ func (r *RequestHeap) insert(req *Request, priority int) error {
 	return nil
 }
 
-func (r *RequestHeap) extract() *Request {
+// extract the root node and replace it with the last element, then sift down.
+func (r *Heap) extract() *Request {
 	req := r.data[0].request
 	r.count--
 	r.data[0] = r.data[r.count]
@@ -163,7 +150,7 @@ func (r *RequestHeap) extract() *Request {
 	return req
 }
 
-func (r *RequestHeap) maxHeapify(i int) {
+func (r *Heap) maxHeapify(i int) {
 	left := leftChildIndex(i)
 	right := rightChildIndex(i)
 	max := i
@@ -194,19 +181,4 @@ func parentIndex(i int) int {
 		return 0
 	}
 	return parent
-}
-
-func (r *RequestHeap) leftChild(i int) (int, requestHeapNode) {
-	lchild := leftChildIndex(i)
-	return lchild, r.data[lchild]
-}
-
-func (r *RequestHeap) rightChild(i int) (int, requestHeapNode) {
-	rchild := rightChildIndex(i)
-	return rchild, r.data[rchild]
-}
-
-func (r *RequestHeap) parent(i int) (int, requestHeapNode) {
-	parent := parentIndex(i)
-	return parent, r.data[parent]
 }

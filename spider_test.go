@@ -4,52 +4,37 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
 	"regexp"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/KillianMeersman/wander"
 	"github.com/KillianMeersman/wander/request"
+	"github.com/KillianMeersman/wander/util"
 	"github.com/PuerkitoBio/goquery"
 )
-
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
-func randomString(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letterRunes[rand.Intn(len(letterRunes))]
-	}
-	return string(b)
-}
 
 type route struct {
 	pattern *regexp.Regexp
 	handler http.Handler
 }
 
-type RegexpHandler struct {
+type regexpHandler struct {
 	routes []*route
 }
 
-func (h *RegexpHandler) Handler(pattern *regexp.Regexp, handler http.Handler) {
+func (h *regexpHandler) Handler(pattern *regexp.Regexp, handler http.Handler) {
 	h.routes = append(h.routes, &route{pattern, handler})
 }
 
-func (h *RegexpHandler) HandleFunc(pattern *regexp.Regexp, handler func(http.ResponseWriter, *http.Request)) {
+func (h *regexpHandler) HandleFunc(pattern *regexp.Regexp, handler func(http.ResponseWriter, *http.Request)) {
 	h.routes = append(h.routes, &route{pattern, http.HandlerFunc(handler)})
 }
 
-func (h *RegexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *regexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, route := range h.routes {
 		if route.pattern.MatchString(r.URL.Path) {
 			route.handler.ServeHTTP(w, r)
@@ -59,52 +44,85 @@ func (h *RegexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// no pattern matched; send 404 response
 	http.NotFound(w, r)
 }
-func randomLinkServer() *http.Server {
 
-	handleFunc := func(w http.ResponseWriter, r *http.Request) {
-		msg := []byte(fmt.Sprintf(`<html><head>
+func randomLinkServer() *http.Server {
+	randomLinks := func(w http.ResponseWriter, r *http.Request) {
+		msg := []byte(fmt.Sprintf(`
+		<html>
+		<head>
 		</head>
 		<body>
-		<a href="/%s">test</a>
-		<a href="/%s">test</a>
-		<a href="/%s">test</a>
+		<a href="/test/%s">test1</a>
+		<a href="/test/%s">test2</a>
+		<a href="/test/%s">test3</a>
 		</body>
-		</html>`, randomString(20), randomString(20), randomString(20)))
+		</html>`, util.RandomString(20), util.RandomString(20), util.RandomString(20)))
 
 		w.Write(msg)
 	}
 
-	handler := &RegexpHandler{}
-	handler.HandleFunc(regexp.MustCompile(".*"), handleFunc)
+	robots := func(w http.ResponseWriter, r *http.Request) {
+		msg := []byte(`
+		User-agent: *
+		Disallow:
+
+		# too many repeated hits, too quick
+		User-agent: Wander/0.1
+		Disallow: /test1
+
+		# Yahoo. too many repeated hits, too quick
+		User-agent: Slurp
+		Disallow: /
+		Allow: /test
+
+		# too many repeated hits, too quick
+		User-agent: Baidu
+		Disallow: /
+		`)
+
+		w.Write(msg)
+	}
+
+	handler := &regexpHandler{}
+	handler.HandleFunc(regexp.MustCompile(`(?m)^\/robots\.txt$`), robots)
+	handler.HandleFunc(regexp.MustCompile(`(?m)^\/test.*`), randomLinks)
+
 	serv := &http.Server{
 		Addr:    "127.0.0.1:8080",
 		Handler: handler,
 	}
-	go serv.ListenAndServe()
 	return serv
 }
 
+func TestMain(m *testing.M) {
+	ctx := context.Background()
+	serv := randomLinkServer()
+	go serv.ListenAndServe()
+	defer serv.Shutdown(ctx)
+	m.Run()
+}
+
 func BenchmarkSpider(b *testing.B) {
-	queue := request.NewRequestHeap(10000)
+	queue := request.NewHeap(b.N)
 	spid, err := wander.NewSpider(
-		wander.AllowedDomains("127.0.0.1"),
-		wander.Threads(4),
+		wander.AllowedDomains("127.0.0.1", "localhost"),
+		wander.Threads(2),
 		wander.Queue(queue),
 	)
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	ctx, stop := context.WithCancel(context.Background())
 	reqn := 0
 	resn := 0
 	resLock := sync.Mutex{}
 	reqLock := sync.Mutex{}
+	ctx, stop := context.WithCancel(context.Background())
 
 	spid.OnResponse(func(res *request.Response) {
 		resLock.Lock()
 		resn++
-		if resn >= 1000 {
+		if resn >= b.N {
 			stop()
 		}
 		resLock.Unlock()
@@ -119,7 +137,7 @@ func BenchmarkSpider(b *testing.B) {
 				err := spid.Follow(link, res, 10-res.Request.Depth())
 				if err != nil {
 					switch err.(type) {
-					case *request.RequestQueueMaxSize:
+					case *request.QueueMaxSize:
 					default:
 						log.Fatal(err)
 					}
@@ -138,11 +156,6 @@ func BenchmarkSpider(b *testing.B) {
 		reqLock.Unlock()
 	})
 
-	err = spid.Visit("http://127.0.0.1:8080/")
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	sigintc := make(chan os.Signal, 1)
 	signal.Notify(sigintc, os.Interrupt)
 	go func() {
@@ -150,9 +163,12 @@ func BenchmarkSpider(b *testing.B) {
 		stop()
 	}()
 
-	serv := randomLinkServer()
+	b.ResetTimer()
+	err = spid.Visit("http://localhost:8080/test/")
+	if err != nil {
+		log.Fatal(err)
+	}
 	spid.Start(ctx)
-	serv.Shutdown(ctx)
 
 	b.Logf("Visited %d, received %d responses. Queue size is %d", reqn, resn, queue.Count())
 }
