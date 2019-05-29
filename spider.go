@@ -278,8 +278,6 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 	resc := make(chan *request.Response)
 	errc := make(chan error)
 
-	s.queue.Start(ctx)
-
 	for i := 0; i < s.ingestorN; i++ {
 		go func() {
 			for {
@@ -287,19 +285,20 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 				case <-ctx.Done():
 					ingestors.Done()
 					return
+				default:
+				}
 
-				case req := <-s.queue.Dequeue():
+				req, ok := s.queue.Dequeue()
+				if ok {
 					if s.filterDomains(req) {
 						s.throttle.Wait(req)
 						reqc <- req
-
 						res, err := s.getResponse(req)
 						if err != nil {
 							errc <- err
 							continue
 						}
 						resc <- res
-
 					} else {
 						s.errorPipeline(fmt.Errorf("domain %s filtered", req.String()))
 					}

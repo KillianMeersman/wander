@@ -1,16 +1,14 @@
 package request
 
 import (
-	"context"
 	"fmt"
 	"sync"
 )
 
-// Queue is a priorized FIFO queue for requests
+// Queue is a prioritized FIFO queue for requests
 type Queue interface {
-	Start(ctx context.Context)
 	Enqueue(req *Request, priority int) error
-	Dequeue() <-chan *Request
+	Dequeue() (*Request, bool)
 	Count() int
 }
 
@@ -46,67 +44,30 @@ type Heap struct {
 	data           []heapNode
 	count          int
 	maxSize        int
-	lock           *sync.Mutex
-	available      *sync.Cond
-	outc           chan *Request
-	inintalized    bool
 	insertionCount int
+	lock           *sync.Mutex
 }
 
+// NewHeap returns a request heap (priority queue).
 func NewHeap(maxSize int) *Heap {
 	lock := &sync.Mutex{}
 	heap := &Heap{
-		data:      make([]heapNode, maxSize/10),
-		maxSize:   maxSize,
-		lock:      lock,
-		available: sync.NewCond(lock),
-		outc:      make(chan *Request),
+		data:    make([]heapNode, maxSize/10),
+		maxSize: maxSize,
+		lock:    lock,
 	}
 	return heap
 }
 
 // BuildHeap builds a request heap from existing data.
 func BuildHeap(data []heapNode, maxSize int) *Heap {
-	lock := &sync.Mutex{}
-	heap := &Heap{
-		data:      data,
-		maxSize:   maxSize,
-		lock:      lock,
-		available: sync.NewCond(lock),
-		outc:      make(chan *Request),
-	}
+	heap := NewHeap(maxSize)
 
 	for i := len(data) / 2; i >= 0; i-- {
 		heap.maxHeapify(i)
 	}
 
 	return heap
-}
-
-// Start starts the consumer goroutine. This method should be called before any calls to Dequeue.
-func (r *Heap) Start(ctx context.Context) {
-	if !r.inintalized {
-		r.outc = make(chan *Request)
-		go func() {
-			for {
-				r.lock.Lock()
-				for r.count < 1 {
-					r.available.Wait()
-				}
-				req := r.extract()
-				r.lock.Unlock()
-
-				select {
-				case r.outc <- req:
-				case <-ctx.Done():
-					r.inintalized = false
-					return
-				}
-
-			}
-		}()
-		r.inintalized = true
-	}
 }
 
 // Enqueue a request with the given priority.
@@ -118,16 +79,28 @@ func (r *Heap) Enqueue(req *Request, priority int) error {
 	if err != nil {
 		return err
 	}
-	r.available.Broadcast()
+
 	return nil
 }
 
-// Dequeue a request. The Dequeue channel is not closed when the context supplied to Start is cancelled.
-func (r *Heap) Dequeue() <-chan *Request {
-	return r.outc
+// Dequeue a request.
+func (r *Heap) Dequeue() (*Request, bool) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	if r.count > 0 {
+		return r.extract(), true
+	}
+	return nil, false
+}
+
+// Peek returns the next request without removing it from the queue.
+func (r *Heap) Peek() *Request {
+	return r.data[0].request
 }
 
 // Count returns the amount of requests in the queue.
+// Returns nil when no requests are in the heap.
 func (r *Heap) Count() int {
 	return r.count
 }
