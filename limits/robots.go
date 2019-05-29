@@ -18,6 +18,7 @@ func (e *RobotParsingError) Error() string {
 	return fmt.Sprintf("Robots.txt for %s invalid: %s", e.Domain, e.Err)
 }
 
+// RobotLimits holds all the limits imposed by a robots exclusion file.
 type RobotLimits struct {
 	defaultLimits *RobotLimitGroup
 	groups        map[string]*RobotLimitGroup
@@ -29,35 +30,17 @@ func newRobotLimits() *RobotLimits {
 	}
 }
 
-func (l *RobotLimits) addLimitGroup(g *RobotLimitGroup) {
-	if g.host == "*" {
-		l.defaultLimits = g
-		return
-	}
-	l.groups[g.host] = g
-}
-
-// Allowed returns true if the user agent is allowed to access the given url.
-func (l *RobotLimits) Allowed(userAgent, url string) bool {
-	group, ok := l.groups[userAgent]
-	if ok {
-		return group.Allowed(url)
-	}
-	if l.defaultLimits != nil {
-		return l.defaultLimits.Allowed(url)
-	}
-	return false
-}
-
+// ParseRobotLimits will parse a robot exclusion file, returns a normal error if it encounters an invalid directive.
 func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 	scanner := bufio.NewScanner(in)
-
-	var group *RobotLimitGroup
 	limits := newRobotLimits()
 
+	// current host specification
+	var group *RobotLimitGroup
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := strings.Trim(scanner.Text(), " \t")
 
+		// ignore empty lines
 		if len(line) < 1 {
 			continue
 		}
@@ -71,10 +54,10 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 		if len(parts) < 1 {
 			return nil, fmt.Errorf("Invalid directive %s", line)
 		}
-		directive := strings.Trim(parts[0], " \t")
+		directive := parts[0]
 		parameter := ""
 		if len(parts) > 1 {
-			parameter = strings.Trim(parts[1], " \t")
+			parameter = strings.TrimPrefix(parts[1], " ")
 		}
 
 		switch directive {
@@ -107,9 +90,6 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 				group.allowed = append(group.allowed, parameter)
 			}
 
-		case "":
-			continue
-
 		default:
 			return nil, fmt.Errorf("Unknown directive %s", line)
 		}
@@ -117,6 +97,26 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 
 	limits.addLimitGroup(group)
 	return limits, nil
+}
+
+func (l *RobotLimits) addLimitGroup(g *RobotLimitGroup) {
+	if g.host == "*" {
+		l.defaultLimits = g
+		return
+	}
+	l.groups[g.host] = g
+}
+
+// Allowed returns true if the user agent is allowed to access the given url.
+func (l *RobotLimits) Allowed(userAgent, url string) bool {
+	group, ok := l.groups[userAgent]
+	if ok {
+		return group.Allowed(url)
+	}
+	if l.defaultLimits != nil {
+		return l.defaultLimits.Allowed(url)
+	}
+	return false
 }
 
 // GetLimits gets the RobotLimitGroup for the userAgent, returns the default (*) group if it was present and no other groups apply.

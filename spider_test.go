@@ -22,19 +22,19 @@ type route struct {
 	handler http.Handler
 }
 
-type RegexpHandler struct {
+type regexpHandler struct {
 	routes []*route
 }
 
-func (h *RegexpHandler) Handler(pattern *regexp.Regexp, handler http.Handler) {
+func (h *regexpHandler) Handler(pattern *regexp.Regexp, handler http.Handler) {
 	h.routes = append(h.routes, &route{pattern, handler})
 }
 
-func (h *RegexpHandler) HandleFunc(pattern *regexp.Regexp, handler func(http.ResponseWriter, *http.Request)) {
+func (h *regexpHandler) HandleFunc(pattern *regexp.Regexp, handler func(http.ResponseWriter, *http.Request)) {
 	h.routes = append(h.routes, &route{pattern, http.HandlerFunc(handler)})
 }
 
-func (h *RegexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *regexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, route := range h.routes {
 		if route.pattern.MatchString(r.URL.Path) {
 			route.handler.ServeHTTP(w, r)
@@ -46,7 +46,6 @@ func (h *RegexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func randomLinkServer() *http.Server {
-
 	randomLinks := func(w http.ResponseWriter, r *http.Request) {
 		msg := []byte(fmt.Sprintf(`
 		<html>
@@ -61,27 +60,30 @@ func randomLinkServer() *http.Server {
 
 		w.Write(msg)
 	}
+
 	robots := func(w http.ResponseWriter, r *http.Request) {
-		msg := []byte(`User-agent: *
-Disallow:
+		msg := []byte(`
+		User-agent: *
+		Disallow:
 
-# too many repeated hits, too quick
-User-agent: Wander/0.1
-Disallow: /someURL
+		# too many repeated hits, too quick
+		User-agent: Wander/0.1
+		Disallow: /someURL
 
-# Yahoo. too many repeated hits, too quick
-User-agent: Slurp
-Disallow: /
-Allow: /test
+		# Yahoo. too many repeated hits, too quick
+		User-agent: Slurp
+		Disallow: /
+		Allow: /test
 
-# too many repeated hits, too quick
-User-agent: Baidu
-Disallow: /`)
+		# too many repeated hits, too quick
+		User-agent: Baidu
+		Disallow: /
+		`)
 
 		w.Write(msg)
 	}
 
-	handler := &RegexpHandler{}
+	handler := &regexpHandler{}
 	handler.HandleFunc(regexp.MustCompile(`(?m)^\/robots\.txt$`), robots)
 	handler.HandleFunc(regexp.MustCompile(`(?m)^\/test.*`), randomLinks)
 
@@ -101,7 +103,7 @@ func TestMain(m *testing.M) {
 }
 
 func BenchmarkSpider(b *testing.B) {
-	queue := request.NewRequestHeap(10000)
+	queue := request.NewRequestHeap(b.N)
 	spid, err := wander.NewSpider(
 		wander.AllowedDomains("127.0.0.1", "localhost"),
 		wander.Threads(2),
@@ -120,7 +122,7 @@ func BenchmarkSpider(b *testing.B) {
 	spid.OnResponse(func(res *request.Response) {
 		resLock.Lock()
 		resn++
-		if resn >= 1000 {
+		if resn >= b.N {
 			stop()
 		}
 		resLock.Unlock()

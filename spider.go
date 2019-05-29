@@ -148,6 +148,7 @@ func Cache(cache request.RequestCache) func(s *Spider) error {
 	}
 }
 
+// IgnoreRobots ignore robots.txt
 func IgnoreRobots() func(s *Spider) error {
 	return func(s *Spider) error {
 		s.ignoreRobots = true
@@ -155,6 +156,7 @@ func IgnoreRobots() func(s *Spider) error {
 	}
 }
 
+// UserAgent set the spider User-agent
 func UserAgent(agent string) func(s *Spider) error {
 	return func(s *Spider) error {
 		s.userAgent = agent
