@@ -231,8 +231,10 @@ type RobotLimitGroup struct {
 
 func newRobotLimitGroup(host string) *RobotLimitGroup {
 	return &RobotLimitGroup{
-		host:  host,
-		delay: -1,
+		host:       host,
+		allowed:    make([]string, 0),
+		disallowed: make([]string, 0),
+		delay:      -1,
 	}
 }
 
@@ -243,14 +245,15 @@ func (g *RobotLimitGroup) Applies(userAgent string) bool {
 
 // Allowed returns true if the url is allowed by the group rules. Check if the group applies to the user agent first by using Applies.
 func (g *RobotLimitGroup) Allowed(url string) bool {
-	for _, allowed := range g.allowed {
-		if strings.HasPrefix(url, allowed) {
+	for _, rule := range g.allowed {
+		if MatchURLRule(rule, url) {
 			return true
 		}
 	}
-	for _, disallowed := range g.disallowed {
-		if strings.HasPrefix(url, disallowed) {
+	for _, rule := range g.disallowed {
+		if MatchURLRule(rule, url) {
 			return false
+
 		}
 	}
 	return true
@@ -267,4 +270,43 @@ func (g *RobotLimitGroup) Delay(def time.Duration) time.Duration {
 // Sitemap returns the sitemap path.
 func (g *RobotLimitGroup) Sitemap() *url.URL {
 	return g.sitemap
+}
+
+// MatchURLRule will return true if the given robot exclusion rule matches the given URL.
+// Supports wildcards ('*') and end of line ('$').
+func MatchURLRule(rule, url string) bool {
+	// index of the current character in url
+	j := 0
+
+	// loop over rule characters
+a:
+	for i := 0; i < len(rule); i++ {
+		switch rule[i] {
+		// wildcard: loop until next rule characer is found
+		case '*':
+			if i+1 == len(rule) {
+				return true
+			}
+			seekChar := rule[i+1]
+			for j < len(url) {
+				if url[j] == seekChar {
+					continue a
+				}
+				j++
+			}
+			return false
+
+		// end of line, return true if we have actually reached the end of url
+		case '$':
+			return j == len(url)
+
+		// check if url and rule matches on indexes j, i
+		default:
+			if rule[i] != url[j] {
+				return false
+			}
+			j++
+		}
+	}
+	return true
 }
