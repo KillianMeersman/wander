@@ -46,3 +46,30 @@ func TestRobotLimits(t *testing.T) {
 		t.Fatal("PriceTracker/0.1 should be allowed")
 	}
 }
+
+func TestMatchURL(t *testing.T) {
+	if !limits.MatchURLRule("/*/*/test", "/hello/world/test") {
+		t.FailNow()
+	}
+	if limits.MatchURLRule("/*/*/test", "/hello/test/ssfs") {
+		t.FailNow()
+	}
+	if limits.MatchURLRule("/*?", "/test/is/nice") {
+		t.FailNow()
+	}
+	if !limits.MatchURLRule("/*?", "/test/is/nice?param=1") {
+		t.FailNow()
+	}
+	if limits.MatchURLRule("/*?$", "/test/is/nice?param=1") {
+		t.FailNow()
+	}
+	if !limits.MatchURLRule("/*?$", "/test/is/nice?") {
+		t.FailNow()
+	}
+	if !limits.MatchURLRule("/*/*/test$", "/test1/test$/test") {
+		t.FailNow()
+	}
+	if !limits.MatchURLRule("/*/*/*", "/test1/test$/test") {
+		t.FailNow()
+	}
+}
