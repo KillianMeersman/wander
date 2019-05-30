@@ -1,21 +1,22 @@
 # Wander
 ## Overview
-Easy-to-use scraping library for Gophers.
+Convenient scraping library for Gophers.
 
-Based on Colly and Scrapy, Wander aims to provide a convenient API that supports advanced use cases.
+Based on Colly and Scrapy, Wander aims to provide an easy-to-use API while also exposing the tools for advanced use cases.
 
 ## Features
-* Prioritized request queueing
+* Prioritized request queueing.
 * Easy parallelization of crawlers and pipelines.
 * Stop, save and resume crawls.
 * Global and per-domain throttling.
-* Proxies
-* Support for robots.txt and custom filter functions (e.a. ignore certain rules)
+* Proxy switching.
+* Support for robots.txt, including non-standard directives and custom filter functions (e.a. ignore certain rules).
 
-## Installation
-`go get -u github.com/KillianMeersman/wander`
+## Roadmap
+* Support for Redis, allowing distributed scraping.
+* Sitemap support.
 
-## Examples
+## Example
 ```go
 package main
 
@@ -24,12 +25,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/KillianMeersman/wander/limits"
-
 	"github.com/PuerkitoBio/goquery"
 
 	"github.com/KillianMeersman/wander"
 	"github.com/KillianMeersman/wander/request"
+	"github.com/KillianMeersman/wander/limits"
 )
 
 func main() {
@@ -66,3 +66,6 @@ func main() {
 	spid.Start(ctx)
 }
 ```
+
+## Installation
+`go get -u github.com/KillianMeersman/wander`
