@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sync"
 
+	"github.com/PuerkitoBio/goquery"
+
 	"github.com/KillianMeersman/wander/limits"
 
 	"github.com/KillianMeersman/wander/request"
@@ -16,6 +18,7 @@ import (
 
 type RequestPipeline func(req *request.Request)
 type ResponsePipeline func(res *request.Response)
+type HTMLPipeline func(el *goquery.Selection)
 type ErrorPipeline func(err error)
 type SpiderConstructorOption func(s *Spider) error
 type RobotLimitFunction func(spid *Spider, req *request.Request) error
@@ -34,6 +37,7 @@ type Spider struct {
 	RobotLimits    *limits.RobotLimitCache
 	limits         map[string]limits.Limit
 	throttle       limits.ThrottleCollection
+	selectors      map[string]HTMLPipeline
 
 	// parallelism
 	ingestorN int
@@ -52,11 +56,12 @@ type Spider struct {
 	errorPipeline    ErrorPipeline
 }
 
-func NewSpider(options ...func(*Spider) error) (*Spider, error) {
+func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 	spider := &Spider{
 		SpiderState:    SpiderState{},
 		allowedDomains: make([]*regexp.Regexp, 0),
 		limits:         make(map[string]limits.Limit),
+		selectors:      make(map[string]HTMLPipeline),
 
 		pipelineN: 1,
 		ingestorN: 1,
@@ -175,6 +180,14 @@ func UserAgent(agent string) SpiderConstructorOption {
 	}
 }
 
+// Throttle is a constructor function for SetThrottles.
+func Throttle(defaultThrottle *limits.DefaultThrottle, domainThrottles ...*limits.DomainThrottle) SpiderConstructorOption {
+	return func(s *Spider) error {
+		s.SetThrottles(defaultThrottle, domainThrottles...)
+		return nil
+	}
+}
+
 /*
 	Getters/setters
 */
@@ -226,18 +239,22 @@ func (s *Spider) SetAllowedDomains(paths ...string) error {
 */
 
 // OnRequest is called when a request is about to be made.
-func (s *Spider) OnRequest(vfunc RequestPipeline) {
-	s.requestPipeline = vfunc
+func (s *Spider) OnRequest(f RequestPipeline) {
+	s.requestPipeline = f
 }
 
 // OnResponse is called when a response has been received and tokenized.
-func (s *Spider) OnResponse(pfunc ResponsePipeline) {
-	s.responsePipeline = pfunc
+func (s *Spider) OnResponse(f ResponsePipeline) {
+	s.responsePipeline = f
+}
+
+func (s *Spider) OnHTML(selector string, f HTMLPipeline) {
+	s.selectors[selector] = f
 }
 
 // OnError is called when an error is encountered.
-func (s *Spider) OnError(efunc ErrorPipeline) {
-	s.errorPipeline = efunc
+func (s *Spider) OnError(f ErrorPipeline) {
+	s.errorPipeline = f
 }
 
 /*
@@ -315,6 +332,11 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 					s.requestPipeline(req)
 				case res := <-resc:
 					s.responsePipeline(res)
+					for selector, pipeline := range s.selectors {
+						res.Find(selector).Each(func(i int, el *goquery.Selection) {
+							pipeline(el)
+						})
+					}
 				case err := <-errc:
 					s.errorPipeline(err)
 				case <-pipelinesCtx.Done():
