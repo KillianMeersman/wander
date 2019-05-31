@@ -95,7 +95,7 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 		}
 
 		// separate directive and parameter
-		parts := strings.Split(line, ":")
+		parts := strings.SplitN(line, ":", 2)
 		if len(parts) < 1 {
 			return nil, fmt.Errorf("Invalid directive %s", line)
 		}
@@ -136,6 +136,9 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 			}
 
 		case "crawl-delay":
+			if group == nil {
+				return nil, errors.New("Crawl-delay directive without User-agent")
+			}
 			dur, err := time.ParseDuration(fmt.Sprintf("%ss", parameter))
 			if err != nil {
 				return nil, err
@@ -146,6 +149,9 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 			group.delay = dur
 
 		case "sitemap":
+			if group == nil {
+				return nil, errors.New("Sitemap directive without User-agent")
+			}
 			url, err := url.Parse(parameter)
 			if err != nil {
 				return nil, err
@@ -153,10 +159,13 @@ func ParseRobotLimits(in io.Reader) (*RobotLimits, error) {
 			group.sitemap = url
 
 		default:
-			return nil, fmt.Errorf("Unknown directive %s", line)
+			continue
 		}
 	}
 
+	if group == nil {
+		return nil, fmt.Errorf("Invalid robot file, no user agents specified")
+	}
 	limits.addLimitGroup(group)
 	return limits, nil
 }
@@ -275,6 +284,11 @@ func (g *RobotLimitGroup) Sitemap() *url.URL {
 // MatchURLRule will return true if the given robot exclusion rule matches the given URL.
 // Supports wildcards ('*') and end of line ('$').
 func MatchURLRule(rule, url string) bool {
+	// if the rule is longer than the url, return false
+	if len(rule) > len(url) {
+		return false
+	}
+
 	// index of the current character in url
 	j := 0
 
@@ -284,9 +298,12 @@ a:
 		switch rule[i] {
 		// wildcard: loop until next rule characer is found
 		case '*':
+			// return true if last rule character is *
 			if i+1 == len(rule) {
 				return true
 			}
+
+			// loop until next rule character is found in url, return false if not found
 			seekChar := rule[i+1]
 			for j < len(url) {
 				if url[j] == seekChar {
@@ -302,6 +319,9 @@ a:
 
 		// check if url and rule matches on indexes j, i
 		default:
+			if j+1 > len(url) {
+				return false
+			}
 			if rule[i] != url[j] {
 				return false
 			}
