@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KillianMeersman/wander/request"
@@ -25,17 +26,22 @@ func (e *RobotParsingError) Error() string {
 // RobotLimitCache holds the robot exclusions for multiple domains.
 type RobotLimitCache struct {
 	limits map[string]*RobotLimits
+	lock   sync.RWMutex
 }
 
 func NewRobotLimitCache() *RobotLimitCache {
 	return &RobotLimitCache{
 		limits: make(map[string]*RobotLimits),
+		lock:   sync.RWMutex{},
 	}
 }
 
 // Allowed returns true if the userAgent is allowed to access the given path on the given domain.
 // Returns error if no robot file is cached for the given domain.
 func (c *RobotLimitCache) Allowed(userAgent string, req *request.Request) (bool, error) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
 	limits, ok := c.limits[req.Host]
 	if !ok {
 		return false, fmt.Errorf("No limits found for domain %s", req.Host)
@@ -45,6 +51,9 @@ func (c *RobotLimitCache) Allowed(userAgent string, req *request.Request) (bool,
 
 // GetLimits gets the limits for a host. Returns an error when no limits are cached for the given host.
 func (c *RobotLimitCache) GetLimits(host string) (*RobotLimits, error) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
 	limits, ok := c.limits[host]
 	if !ok {
 		return nil, fmt.Errorf("No limits found for domain %s", host)
@@ -54,6 +63,9 @@ func (c *RobotLimitCache) GetLimits(host string) (*RobotLimits, error) {
 
 // AddLimits adds or replaces the limits for a host. Returns an error if the limits are invalid.
 func (c *RobotLimitCache) AddLimits(in io.Reader, host string) (*RobotLimits, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	limits, err := ParseRobotLimits(in)
 	if err != nil {
 		return nil, err
