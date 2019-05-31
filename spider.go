@@ -18,7 +18,7 @@ import (
 
 type RequestPipeline func(req *request.Request)
 type ResponsePipeline func(res *request.Response)
-type HTMLPipeline func(el *goquery.Selection)
+type HTMLPipeline func(res *request.Response, el *goquery.Selection)
 type ErrorPipeline func(err error)
 type SpiderConstructorOption func(s *Spider) error
 type RobotLimitFunction func(spid *Spider, req *request.Request) error
@@ -42,8 +42,6 @@ type Spider struct {
 	// parallelism
 	ingestorN int
 	pipelineN int
-	ctx       context.Context
-	cancel    func()
 
 	// http
 	client *http.Client
@@ -288,9 +286,7 @@ func (s *Spider) Follow(path string, res *request.Response, priority int) error 
 
 // Start the spider, blocks while the spider is running. Returns the a cancel function similar to context that returns the Spider state.
 // The spider state can be usedwith the Resume function to resume a crawl.
-func (s *Spider) Start(ctx context.Context) func() *SpiderState {
-	s.ctx, s.cancel = context.WithCancel(ctx)
-
+func (s *Spider) Start(ctx context.Context) *SpiderState {
 	ingestors := sync.WaitGroup{}
 	ingestors.Add(s.ingestorN)
 	pipelines := sync.WaitGroup{}
@@ -305,7 +301,7 @@ func (s *Spider) Start(ctx context.Context) func() *SpiderState {
 		go func() {
 			for {
 				select {
-				case <-s.ctx.Done():
+				case <-ctx.Done():
 					ingestors.Done()
 					return
 				default:
@@ -356,14 +352,11 @@ func (s *Spider) Start(ctx context.Context) func() *SpiderState {
 	ingestors.Wait()
 	stopPipelines()
 	pipelines.Wait()
-	return func() *SpiderState {
-		s.cancel()
-		return &s.SpiderState
-	}
+	return &s.SpiderState
 }
 
 // Resume from spider state, blocks while the spider is running. Returns the spider state after context is cancelled.
-func (s *Spider) Resume(ctx context.Context, state *SpiderState) func() *SpiderState {
+func (s *Spider) Resume(ctx context.Context, state *SpiderState) *SpiderState {
 	s.SpiderState = *state
 	return s.Start(ctx)
 }
