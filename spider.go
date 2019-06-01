@@ -336,7 +336,7 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 					s.responsePipeline(res)
 					for selector, pipeline := range s.selectors {
 						res.Find(selector).Each(func(i int, el *goquery.Selection) {
-							pipeline(el)
+							pipeline(res, el)
 						})
 					}
 				case err := <-errc:
