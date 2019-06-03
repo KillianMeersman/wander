@@ -103,10 +103,10 @@ func TestMain(m *testing.M) {
 }
 
 func BenchmarkSpider(b *testing.B) {
-	queue := request.NewHeap(b.N)
+	queue := request.NewHeap(b.N * 3)
 	spid, err := wander.NewSpider(
 		wander.AllowedDomains("127.0.0.1", "localhost"),
-		wander.Threads(2),
+		wander.Threads(4),
 		wander.Queue(queue),
 	)
 	if err != nil {

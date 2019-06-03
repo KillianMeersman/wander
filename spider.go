@@ -1,3 +1,5 @@
+// Package wander is a scraping library for Go.
+// It aims to provide an easy to use API while also exposing tools for advanced use cases.
 package wander
 
 import (
@@ -9,6 +11,8 @@ import (
 	"regexp"
 	"sync"
 
+	"github.com/KillianMeersman/wander/util"
+
 	"github.com/PuerkitoBio/goquery"
 
 	"github.com/KillianMeersman/wander/limits"
@@ -16,10 +20,6 @@ import (
 	"github.com/KillianMeersman/wander/request"
 )
 
-type RequestPipeline func(req *request.Request)
-type ResponsePipeline func(res *request.Response)
-type HTMLPipeline func(res *request.Response, el *goquery.Selection)
-type ErrorPipeline func(err error)
 type SpiderConstructorOption func(s *Spider) error
 type RobotLimitFunction func(spid *Spider, req *request.Request) error
 
@@ -37,7 +37,7 @@ type Spider struct {
 	RobotLimits    *limits.RobotLimitCache
 	limits         map[string]limits.Limit
 	throttle       limits.ThrottleCollection
-	selectors      map[string]HTMLPipeline
+	selectors      map[string]func(*request.Response, *goquery.Selection)
 
 	// parallelism
 	ingestorN int
@@ -51,9 +51,9 @@ type Spider struct {
 	RobotExclusionFunction RobotLimitFunction
 
 	// callbacks
-	requestPipeline  RequestPipeline
-	responsePipeline ResponsePipeline
-	errorPipeline    ErrorPipeline
+	requestPipeline  func(*request.Request)
+	responsePipeline func(*request.Response)
+	errorPipeline    func(error)
 }
 
 func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
@@ -61,13 +61,13 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 		SpiderState:    SpiderState{},
 		allowedDomains: make([]*regexp.Regexp, 0),
 		limits:         make(map[string]limits.Limit),
-		selectors:      make(map[string]HTMLPipeline),
+		selectors:      make(map[string]func(*request.Response, *goquery.Selection)),
 
 		pipelineN: 1,
 		ingestorN: 1,
 
 		client:                 &http.Client{},
-		UserAgent:              "Wander/0.1",
+		UserAgent:              "WanderBot",
 		RobotExclusionFunction: FollowRobotRules,
 
 		responsePipeline: func(res *request.Response) {},
@@ -239,22 +239,22 @@ func (s *Spider) SetAllowedDomains(paths ...string) error {
 */
 
 // OnRequest is called when a request is about to be made.
-func (s *Spider) OnRequest(f RequestPipeline) {
+func (s *Spider) OnRequest(f func(req *request.Request)) {
 	s.requestPipeline = f
 }
 
 // OnResponse is called when a response has been received and tokenized.
-func (s *Spider) OnResponse(f ResponsePipeline) {
+func (s *Spider) OnResponse(f func(res *request.Response)) {
 	s.responsePipeline = f
 }
 
 // OnHTML is called for each element matching the selector in a response body
-func (s *Spider) OnHTML(selector string, f HTMLPipeline) {
+func (s *Spider) OnHTML(selector string, f func(res *request.Response, el *goquery.Selection)) {
 	s.selectors[selector] = f
 }
 
 // OnError is called when an error is encountered.
-func (s *Spider) OnError(f ErrorPipeline) {
+func (s *Spider) OnError(f func(err error)) {
 	s.errorPipeline = f
 }
 
@@ -262,7 +262,7 @@ func (s *Spider) OnError(f ErrorPipeline) {
 	Control/navigation functions
 */
 
-// Visit a page by adding the path to the queue, blocks when the queue is full until there is free space.
+// Visit adds a request with the given path to the queue with maximum priority. Blocks when the queue is full until there is free space.
 // This method is meant to be used solely for setting the starting points of crawls before calling Start.
 func (s *Spider) Visit(path string) error {
 	req, err := request.NewRequest(path, nil)
@@ -270,7 +270,7 @@ func (s *Spider) Visit(path string) error {
 		return err
 	}
 
-	return s.addRequest(req, int(^uint(0)>>1))
+	return s.addRequest(req, util.MaxInt)
 }
 
 // Follow a link by adding the path to the queue, blocks when the queue is full until there is free space.
@@ -284,8 +284,8 @@ func (s *Spider) Follow(path string, res *request.Response, priority int) error 
 	return s.addRequest(req, priority)
 }
 
-// Start the spider, blocks while the spider is running. Returns the a cancel function similar to context that returns the Spider state.
-// The spider state can be usedwith the Resume function to resume a crawl.
+// Start the spider, blocks while the spider is running. Returns the spider state upon cancellation.
+// The spider state can then be used with the Resume function to resume a crawl.
 func (s *Spider) Start(ctx context.Context) *SpiderState {
 	ingestors := sync.WaitGroup{}
 	ingestors.Add(s.ingestorN)
@@ -319,7 +319,7 @@ func (s *Spider) Start(ctx context.Context) *SpiderState {
 						}
 						resc <- res
 					} else {
-						s.errorPipeline(fmt.Errorf("domain %s filtered", req.String()))
+						errc <- ForbiddenDomain{req.URL}
 					}
 				}
 			}
@@ -411,10 +411,10 @@ func (s *Spider) GetRobotLimits(req *request.Request) (*limits.RobotLimits, erro
 		return nil, err
 	}
 
-	domainLimits, err := s.RobotLimits.AddLimits(res.Body, req.Host)
 	defer res.Body.Close()
+	domainLimits, err := s.RobotLimits.AddLimits(res.Body, req.Host)
 	if err != nil {
-		return nil, &limits.RobotParsingError{
+		return nil, InvalidRobots{
 			Domain: req.Host,
 			Err:    err.Error(),
 		}
@@ -431,19 +431,21 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 		}
 	}
 
+	// check cache to prevent URL revisit
+	if s.cache.VisitedURL(req) {
+		return AlreadyVisited{req.URL}
+	}
+	s.cache.AddRequest(req)
+
 	// check robots.txt
 	err := s.RobotExclusionFunction(s, req)
 	if err != nil {
 		return err
 	}
 
-	// check cache to prevent URL revisit
-	if !s.cache.VisitedURL(req) {
-		s.cache.AddRequest(req)
-		err := s.queue.Enqueue(req, priority)
-		if err != nil {
-			return err
-		}
+	err = s.queue.Enqueue(req, priority)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -469,7 +471,7 @@ func FollowRobotRules(s *Spider, req *request.Request) error {
 
 	// check if the rules allow this request
 	if !rules.Allowed(s.UserAgent, req.Path) {
-		return fmt.Errorf("request for %s denied by robots.txt", req.String())
+		return RobotDenied{req.URL}
 	}
 
 	// check crawl-delay
