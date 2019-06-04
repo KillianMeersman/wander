@@ -28,20 +28,17 @@ import (
 	"github.com/PuerkitoBio/goquery"
 
 	"github.com/KillianMeersman/wander"
-	"github.com/KillianMeersman/wander/request"
 	"github.com/KillianMeersman/wander/limits"
+	"github.com/KillianMeersman/wander/request"
 )
 
 func main() {
-	spid, err := wander.NewSpider(
-		wander.AllowedDomains("github.com", "www.github.com"),
+	spid, _ := wander.NewSpider(
+		wander.AllowedDomains("wikipedia.org", "en.wikipedia.org"),
 		wander.MaxDepth(10),
-		wander.IgnoreRobots(),
+		wander.Throttle(limits.NewDefaultThrottle(200*time.Millisecond)),
+		wander.Threads(2),
 	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	spid.SetThrottles(limits.NewDefaultThrottle(time.Second))
 
 	spid.OnRequest(func(req *request.Request) {
 		log.Printf("visiting %s", req)
@@ -49,21 +46,29 @@ func main() {
 
 	spid.OnResponse(func(res *request.Response) {
 		log.Printf("response from %s", res.Request)
-		res.Find("a[href]").Each(func(i int, sel *goquery.Selection) {
-			link, ok := sel.Attr("href")
-			if ok {
-				spid.Follow(link, res, 10-res.Request.Depth())
-			}
-		})
 	})
 
 	spid.OnError(func(err error) {
 		log.Fatal(err)
 	})
 
-	ctx := context.Background()
-	spid.Visit("https://github.com")
-	spid.Start(ctx)
+	spid.OnHTML("a[href]", func(res *request.Response, el *goquery.Selection) {
+		link, _ := el.Attr("href")
+
+		if err := spid.Follow(link, res, 10-res.Request.Depth()); err != nil {
+			log.Printf(err.Error())
+		}
+	})
+
+	spid.Visit("https://en.wikipedia.org")
+
+	go func() {
+		<-time.After(5 * time.Second)
+		spid.Stop(context.Background())
+	}()
+
+	spid.Start()
+	spid.Wait()
 }
 ```
 
