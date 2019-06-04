@@ -34,9 +34,10 @@ import (
 
 func main() {
 	spid, _ := wander.NewSpider(
-		wander.AllowedDomains("reddit.com", "www.reddit.com"),
+		wander.AllowedDomains("wikipedia.org", "en.wikipedia.org"),
 		wander.MaxDepth(10),
-		wander.Throttle(limits.NewDefaultThrottle(time.Second)),
+		wander.Throttle(limits.NewDefaultThrottle(200*time.Millisecond)),
+		wander.Threads(2),
 	)
 
 	spid.OnRequest(func(req *request.Request) {
@@ -59,8 +60,15 @@ func main() {
 		}
 	})
 
-	spid.Visit("https://www.reddit.com")
-	spid.Start(context.Background())
+	spid.Visit("https://en.wikipedia.org")
+
+	go func() {
+		<-time.After(5 * time.Second)
+		spid.Stop(context.Background())
+	}()
+
+	spid.Start()
+	spid.Wait()
 }
 ```
 

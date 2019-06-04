@@ -84,7 +84,7 @@ func TestMatchURL(t *testing.T) {
 	if !limits.MatchURLRule("", "") {
 		t.FailNow()
 	}
-	if limits.MatchURLRule("/*/?z=1", "/test/") {
+	if limits.MatchURLRule("/*/?z=1", "/bolpuntcom/") {
 		t.FailNow()
 	}
 	if !limits.MatchURLRule("/*/?z=1", "/test/?z=1") {

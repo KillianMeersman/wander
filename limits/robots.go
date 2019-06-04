@@ -291,7 +291,7 @@ loop: // loop over rule characters
 
 		// check if url and rule matches on indexes j, i
 		default:
-			if rule[i] != url[j] {
+			if j >= len(url) || rule[i] != url[j] {
 				return false
 			}
 			j++

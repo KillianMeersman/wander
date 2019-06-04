@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
 	"regexp"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/KillianMeersman/wander"
 	"github.com/KillianMeersman/wander/request"
@@ -117,13 +116,14 @@ func BenchmarkSpider(b *testing.B) {
 	resn := 0
 	resLock := sync.Mutex{}
 	reqLock := sync.Mutex{}
-	ctx, stop := context.WithCancel(context.Background())
 
 	spid.OnResponse(func(res *request.Response) {
 		resLock.Lock()
 		resn++
 		if resn >= b.N {
-			stop()
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			spid.Stop(ctx)
 		}
 		resLock.Unlock()
 
@@ -156,19 +156,13 @@ func BenchmarkSpider(b *testing.B) {
 		reqLock.Unlock()
 	})
 
-	sigintc := make(chan os.Signal, 1)
-	signal.Notify(sigintc, os.Interrupt)
-	go func() {
-		<-sigintc
-		stop()
-	}()
-
 	b.ResetTimer()
 	err = spid.Visit("http://localhost:8080/test/")
 	if err != nil {
 		log.Fatal(err)
 	}
-	spid.Start(ctx)
+	spid.Start()
+	spid.Wait()
 
 	b.Logf("Visited %d, received %d responses. Queue size is %d", reqn, resn, queue.Count())
 }
