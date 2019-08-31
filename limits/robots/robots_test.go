@@ -1,13 +1,13 @@
-package limits_test
+package robots_test
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/KillianMeersman/wander/limits"
+	"github.com/KillianMeersman/wander/limits/robots"
 )
 
-var robots string = `
+var robotsTxt string = `
 User-agent: *
 Disallow:
 
@@ -26,9 +26,9 @@ Disallow: /
 `
 
 func TestRobotLimits(t *testing.T) {
-	reader := strings.NewReader(robots)
+	reader := strings.NewReader(robotsTxt)
 
-	limits, err := limits.ParseRobotLimits(reader)
+	limits, err := robots.FromReader(reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,46 +48,46 @@ func TestRobotLimits(t *testing.T) {
 }
 
 func TestMatchURL(t *testing.T) {
-	if !limits.MatchURLRule("/*/*/test", "/hello/world/test") {
+	if !robots.MatchURLRule("/*/*/test", "/hello/world/test") {
 		t.FailNow()
 	}
-	if limits.MatchURLRule("/*/*/test", "/hello/test/ssfs") {
+	if robots.MatchURLRule("/*/*/test", "/hello/test/ssfs") {
 		t.FailNow()
 	}
-	if limits.MatchURLRule("/*?", "/test/is/nice") {
+	if robots.MatchURLRule("/*?", "/test/is/nice") {
 		t.FailNow()
 	}
-	if !limits.MatchURLRule("/*?", "/test/is/nice?param=1") {
+	if !robots.MatchURLRule("/*?", "/test/is/nice?param=1") {
 		t.FailNow()
 	}
-	if limits.MatchURLRule("/*?$", "/test/is/nice?param=1") {
+	if robots.MatchURLRule("/*?$", "/test/is/nice?param=1") {
 		t.FailNow()
 	}
-	if !limits.MatchURLRule("/*?$", "/test/is/nice?") {
+	if !robots.MatchURLRule("/*?$", "/test/is/nice?") {
 		t.FailNow()
 	}
-	if !limits.MatchURLRule("/*/*/test$", "/test1/test$/test") {
+	if !robots.MatchURLRule("/*/*/test$", "/test1/test$/test") {
 		t.FailNow()
 	}
-	if !limits.MatchURLRule("/*/*/*", "/test1/test$/test") {
+	if !robots.MatchURLRule("/*/*/*", "/test1/test$/test") {
 		t.FailNow()
 	}
-	if limits.MatchURLRule("/test1/test2/*?", "/") {
+	if robots.MatchURLRule("/test1/test2/*?", "/") {
 		t.FailNow()
 	}
-	if limits.MatchURLRule("/", "") {
+	if robots.MatchURLRule("/", "") {
 		t.FailNow()
 	}
-	if !limits.MatchURLRule("", "/") {
+	if !robots.MatchURLRule("", "/") {
 		t.FailNow()
 	}
-	if !limits.MatchURLRule("", "") {
+	if !robots.MatchURLRule("", "") {
 		t.FailNow()
 	}
-	if limits.MatchURLRule("/*/?z=1", "/bolpuntcom/") {
+	if robots.MatchURLRule("/*/?z=1", "/bolpuntcom/") {
 		t.FailNow()
 	}
-	if !limits.MatchURLRule("/*/?z=1", "/test/?z=1") {
+	if !robots.MatchURLRule("/*/?z=1", "/test/?z=1") {
 		t.FailNow()
 	}
 }

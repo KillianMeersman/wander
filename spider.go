@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sync"
 
+	"github.com/KillianMeersman/wander/limits/robots"
 	"github.com/KillianMeersman/wander/util"
 
 	"github.com/PuerkitoBio/goquery"
@@ -93,7 +94,7 @@ type SpiderState struct {
 type Spider struct {
 	SpiderState
 	allowedDomains []*regexp.Regexp
-	RobotLimits    *limits.RobotLimitCache
+	RobotLimits    *robots.Cache
 	limits         map[string]limits.Limit
 	throttle       limits.ThrottleCollection
 
@@ -238,7 +239,7 @@ func Cache(cache request.Cache) SpiderConstructorOption {
 }
 
 // RobotLimits sets the robot exclusion cache.
-func RobotLimits(limits *limits.RobotLimitCache) SpiderConstructorOption {
+func RobotLimits(limits *robots.Cache) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.RobotLimits = limits
 		return nil
@@ -443,7 +444,7 @@ func (s *Spider) init() {
 		s.cache = request.NewCache()
 	}
 	if s.RobotLimits == nil {
-		s.RobotLimits = limits.NewRobotLimitCache()
+		s.RobotLimits = robots.NewCache()
 	}
 }
 
@@ -476,7 +477,7 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 
 // GetRobotLimits downloads and parses the robots.txt file for a domain.
 // Respects the spider throttles.
-func (s *Spider) GetRobotLimits(req *request.Request) (*limits.RobotLimits, error) {
+func (s *Spider) GetRobotLimits(req *request.Request) (*robots.Limits, error) {
 	s.throttle.Wait(req)
 	res, err := s.client.Get(fmt.Sprintf("%s://%s/robots.txt", req.Scheme, req.Host))
 	if err != nil {
