@@ -275,8 +275,8 @@ func MatchURLRule(rule, url string) bool {
 
 			// loop until next rule character is found in url, return false if not found
 			seekChar := rule[i+1]
-			match := false
-			j, match = matchWildcard(seekChar, url)
+			add, match := matchWildcard(seekChar, url[j:len(url)])
+			j += add
 			if !match {
 				return false
 			}

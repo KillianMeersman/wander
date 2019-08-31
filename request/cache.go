@@ -1,7 +1,6 @@
 package request
 
 import (
-	"net/url"
 	"sync"
 )
 
@@ -14,14 +13,14 @@ type Cache interface {
 
 // LocalCache holds urls in maps. Safe for use by multiple goroutines.
 type LocalCache struct {
-	requests map[*url.URL]struct{}
+	requests map[string]struct{}
 	domains  map[string]struct{}
 	lock     sync.RWMutex
 }
 
 func NewCache() *LocalCache {
 	return &LocalCache{
-		requests: make(map[*url.URL]struct{}),
+		requests: make(map[string]struct{}),
 		domains:  make(map[string]struct{}),
 		lock:     sync.RWMutex{},
 	}
@@ -32,7 +31,7 @@ func (c *LocalCache) AddRequest(req *Request) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.requests[req.URL] = struct{}{}
+	c.requests[req.URL.String()] = struct{}{}
 }
 
 // VisitedURL returns true if the request url has been visited before.
@@ -40,7 +39,7 @@ func (c *LocalCache) VisitedURL(req *Request) bool {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
-	_, ok := c.requests[req.URL]
+	_, ok := c.requests[req.URL.String()]
 	return ok
 }
 
