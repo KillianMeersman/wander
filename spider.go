@@ -64,18 +64,19 @@ func (s *Spider) spawnPipelines(n int) {
 					return
 
 				case req := <-s.reqc:
-					s.reqf(req)
+					s.requestFunc(req)
 
 				case res := <-s.resc:
-					s.resf(res)
+					s.responseFunc(res)
 					for selector, pipeline := range s.selectors {
 						res.Find(selector).Each(func(i int, el *goquery.Selection) {
 							pipeline(res, el)
 						})
 					}
+					s.pipelineDoneFunc()
 
 				case err := <-s.errc:
-					s.errf(err)
+					s.errorFunc(err)
 
 				}
 			}
@@ -115,10 +116,11 @@ type Spider struct {
 	runningCond *sync.Cond
 
 	// callbacks
-	reqf      func(*request.Request)
-	resf      func(*request.Response)
-	errf      func(error)
-	selectors map[string]func(*request.Response, *goquery.Selection)
+	requestFunc      func(*request.Request)
+	responseFunc     func(*request.Response)
+	errorFunc        func(error)
+	selectors        map[string]func(*request.Response, *goquery.Selection)
+	pipelineDoneFunc func()
 
 	// http
 	client *http.Client
@@ -148,13 +150,14 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 		reqc:        make(chan *request.Request),
 		resc:        make(chan *request.Response),
 		errc:        make(chan error),
-		selectors:   make(map[string]func(*request.Response, *goquery.Selection)),
 		lock:        lock,
 		runningCond: cond,
 
-		reqf: func(req *request.Request) {},
-		resf: func(res *request.Response) {},
-		errf: func(err error) {},
+		requestFunc:      func(req *request.Request) {},
+		responseFunc:     func(res *request.Response) {},
+		errorFunc:        func(err error) {},
+		selectors:        make(map[string]func(*request.Response, *goquery.Selection)),
+		pipelineDoneFunc: func() {},
 	}
 
 	for _, option := range options {
@@ -322,12 +325,12 @@ func (s *Spider) SetAllowedDomains(paths ...string) error {
 
 // OnRequest is called when a request is about to be made.
 func (s *Spider) OnRequest(f func(req *request.Request)) {
-	s.reqf = f
+	s.requestFunc = f
 }
 
 // OnResponse is called when a response has been received and tokenized.
 func (s *Spider) OnResponse(f func(res *request.Response)) {
-	s.resf = f
+	s.responseFunc = f
 }
 
 // OnHTML is called for each element matching the selector in a response body
@@ -337,7 +340,12 @@ func (s *Spider) OnHTML(selector string, f func(res *request.Response, el *goque
 
 // OnError is called when an error is encountered.
 func (s *Spider) OnError(f func(err error)) {
-	s.errf = f
+	s.errorFunc = f
+}
+
+// OnPipelineFinished is called when a pipeline (all callbacks and selectors) finishes
+func (s *Spider) OnPipelineFinished(f func()) {
+	s.pipelineDoneFunc = f
 }
 
 /*
