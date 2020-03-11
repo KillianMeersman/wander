@@ -24,6 +24,19 @@ import (
 type SpiderConstructorOption func(s *Spider) error
 type RobotLimitFunction func(spid *Spider, req *request.Request) error
 
+// handleRequest waits for any throttling, sends the request down the request channel and gets the response.
+func (s *Spider) handleRequest(req *request.Request, reqChannel chan *request.Request) (*request.Response, error) {
+	s.throttle.Wait(req)
+
+	select {
+	case s.reqc <- req:
+	default:
+	}
+
+	return s.getResponse(req)
+}
+
+// spawnIngestors spawns a new ingestor goroutine.
 func (s *Spider) spawnIngestors(n int) {
 	s.ingestorWg.Add(n)
 	for i := 0; i < n; i++ {
@@ -38,21 +51,28 @@ func (s *Spider) spawnIngestors(n int) {
 
 				req, ok := s.queue.Dequeue()
 				if ok {
-					s.throttle.Wait(req)
-
-					s.reqc <- req
-					res, err := s.getResponse(req)
+					res, err := s.handleRequest(req, s.reqc)
 					if err != nil {
-						s.errc <- err
+						select {
+						case s.errc <- err:
+						default:
+						}
+
 						continue
 					}
-					s.resc <- res
+
+					select {
+					case s.resc <- res:
+					default:
+					}
+
 				}
 			}
 		}()
 	}
 }
 
+// spawnPipelines spawns a new pipeline goroutine.
 func (s *Spider) spawnPipelines(n int) {
 	s.pipelineWg.Add(n)
 	for i := 0; i < n; i++ {
@@ -361,6 +381,16 @@ func (s *Spider) Visit(path string) error {
 	}
 
 	return s.addRequest(req, util.MaxInt)
+}
+
+// VisitNow visits the given url without adding it to the queue. It will still wait for any throttling.
+func (s *Spider) VisitNow(path string) (*request.Response, error) {
+	req, err := request.NewRequest(path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.handleRequest(req, s.reqc)
 }
 
 // Follow a link by adding the path to the queue, blocks when the queue is full until there is free space.
