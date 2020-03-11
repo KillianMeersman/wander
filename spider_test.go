@@ -101,11 +101,27 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+func TestSyncVisit(t *testing.T) {
+	queue := request.NewHeap(10)
+	spid, err := wander.NewSpider(
+		wander.AllowedDomains("127.0.0.1", "localhost"),
+		wander.Threads(6),
+		wander.Queue(queue),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = spid.VisitNow("http://localhost:8080/test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func BenchmarkSpider(b *testing.B) {
 	queue := request.NewHeap(b.N * 3)
 	spid, err := wander.NewSpider(
 		wander.AllowedDomains("127.0.0.1", "localhost"),
-		wander.Threads(4),
+		wander.Threads(6),
 		wander.Queue(queue),
 	)
 	if err != nil {
@@ -115,7 +131,6 @@ func BenchmarkSpider(b *testing.B) {
 	reqn := 0
 	resn := 0
 	resLock := sync.Mutex{}
-	reqLock := sync.Mutex{}
 
 	spid.OnResponse(func(res *request.Response) {
 		resLock.Lock()
@@ -151,9 +166,7 @@ func BenchmarkSpider(b *testing.B) {
 	})
 
 	spid.OnRequest(func(req *request.Request) {
-		reqLock.Lock()
 		reqn++
-		reqLock.Unlock()
 	})
 
 	b.ResetTimer()
