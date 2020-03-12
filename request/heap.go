@@ -150,31 +150,46 @@ func (r *Heap) extract() *Request {
 	return req
 }
 
+// Sort the heap so that the highest priority request is the root node
+// Starts from i (array index) and sifts down, swapping nodes as nescesary along the way
 func (r *Heap) maxHeapify(i int) {
-	left := leftChildIndex(i)
-	right := rightChildIndex(i)
 	max := i
+	for {
+		// get the children and set the current max value to the starting node
+		left := leftChildIndex(i)
+		right := rightChildIndex(i)
 
-	if left < r.count && less(r.data[max], r.data[left]) {
-		max = left
-	}
-	if right < r.count && less(r.data[max], r.data[right]) {
-		max = right
-	}
-	if max != i {
+		// if left child is not the last node and is less than the parent node, set max to this node index
+		if left < r.count && less(r.data[max], r.data[left]) {
+			max = left
+		}
+		// same thing, but with right child
+		if right < r.count && less(r.data[max], r.data[right]) {
+			max = right
+		}
+
+		// stop sifting if no swap occured, the heap is sorted
+		if max == i {
+			return
+		}
+
+		// if a swap occured, swap the actual data and continue sifting into the next node
 		r.data[i], r.data[max] = r.data[max], r.data[i]
-		r.maxHeapify(max)
+		i = max
 	}
 }
 
+// get the index of the left child node
 func leftChildIndex(i int) int {
 	return (i * 2) + 1
 }
 
+// get the index of the right child node
 func rightChildIndex(i int) int {
 	return (i * 2) + 2
 }
 
+// get the index of the parent node
 func parentIndex(i int) int {
 	parent := ((i + 1) / 2) - 1
 	if parent < 0 {

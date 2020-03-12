@@ -21,6 +21,7 @@ import (
 	"github.com/KillianMeersman/wander/request"
 )
 
+// SpiderConstructorOption used for chaining constructor options
 type SpiderConstructorOption func(s *Spider) error
 type RobotLimitFunction func(spid *Spider, req *request.Request) error
 
