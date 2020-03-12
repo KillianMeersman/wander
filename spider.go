@@ -38,6 +38,7 @@ func (s *Spider) handleRequest(req *request.Request, reqChannel chan *request.Re
 }
 
 // spawnIngestors spawns a new ingestor goroutine.
+// Ingestors make requests and do not handle pipelines as these often have blocking code (such as db calls).
 func (s *Spider) spawnIngestors(n int) {
 	s.ingestorWg.Add(n)
 	for i := 0; i < n; i++ {
@@ -74,6 +75,7 @@ func (s *Spider) spawnIngestors(n int) {
 }
 
 // spawnPipelines spawns a new pipeline goroutine.
+// Pipelines handle document parsing and callbacks.
 func (s *Spider) spawnPipelines(n int) {
 	s.pipelineWg.Add(n)
 	for i := 0; i < n; i++ {
@@ -106,7 +108,7 @@ func (s *Spider) spawnPipelines(n int) {
 }
 
 // SpiderState holds a spider's state, such as the request queue and cache.
-// It is returned by the Start and Resume methods, allows the Resume method to resume a previously stopped crawl.
+// It is returned by the Start and Resume methods, allowing the Resume method to resume a previously stopped crawl.
 type SpiderState struct {
 	queue request.Queue
 	cache request.Cache
@@ -405,6 +407,8 @@ func (s *Spider) Follow(path string, res *request.Response, priority int) error 
 	return s.addRequest(req, priority)
 }
 
+// start the spider by spawning all required ingestors/pipelines
+// This method is idempotent and will return without doing anything if the spider is already running.
 func (s *Spider) start() {
 	if s.running {
 		return
@@ -435,7 +439,7 @@ func (s *Spider) Resume(ctx context.Context, state *SpiderState) {
 }
 
 // Stop the spider if it is currently running, returns a SpiderState to allow a later call to Resume.
-// Stop accepts a context and will return if it is cancelled, regardless of spider status.
+// Accepts a context and will forcibly stop the spider if cancelled, regardless of status.
 // This method is idempotent and will return without doing anything if the spider is not running.
 func (s *Spider) Stop(ctx context.Context) *SpiderState {
 	s.lock.Lock()
