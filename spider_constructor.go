@@ -1,4 +1,4 @@
-package spider
+package wander
 
 import (
 	"net/http"
