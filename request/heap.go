@@ -50,8 +50,8 @@ type Heap struct {
 	count          int
 	maxSize        int
 	insertionCount int
+	lock           *sync.Mutex
 	fillCond       *sync.Cond
-	outlet         chan *Request
 }
 
 // NewHeap returns a request heap (priority queue).
@@ -60,8 +60,8 @@ func NewHeap(maxSize int) *Heap {
 	heap := &Heap{
 		data:     make([]heapNode, maxSize/10),
 		maxSize:  maxSize,
+		lock:     lock,
 		fillCond: sync.NewCond(lock),
-		outlet:   make(chan *Request),
 	}
 	return heap
 }
@@ -79,11 +79,17 @@ func BuildHeap(data []heapNode, maxSize int) *Heap {
 
 // Enqueue a request with the given priority.
 func (r *Heap) Enqueue(req *Request, priority int) error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	return r.insert(req, priority)
 }
 
 // Dequeue a request.
 func (r *Heap) Dequeue() (*Request, error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	if r.count > 0 {
 		return r.extract(), nil
 	}
@@ -94,11 +100,11 @@ func (r *Heap) Wait() <-chan *Request {
 	outlet := make(chan *Request)
 	go func() {
 		r.fillCond.L.Lock()
-		defer r.fillCond.L.Unlock()
 		for r.count < 1 {
 			r.fillCond.Wait()
 		}
 		req := r.extract()
+		r.fillCond.L.Unlock()
 		outlet <- req
 	}()
 	return outlet

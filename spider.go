@@ -169,7 +169,7 @@ func (s *Spider) VisitNow(path string) (*request.Response, error) {
 		return nil, err
 	}
 
-	return s.handleRequest(req)
+	return s.getResponse(req)
 }
 
 // Follow a link by adding the path to the queue, blocks when the queue is full until there is free space.
@@ -273,7 +273,9 @@ func (s *Spider) filterDomains(request *request.Request) bool {
 
 // getResponse waits for throttles and makes a GET request.
 func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
-
+	if req == nil {
+		panic("ohno")
+	}
 	s.throttle.Wait(req)
 
 	res, err := s.client.Get(req.String())
@@ -286,12 +288,6 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 		return nil, err
 	}
 	return doc, nil
-}
-
-// handleRequest waits for any throttling, sends the request down the request channel and gets the response.
-func (s *Spider) handleRequest(req *request.Request) (*request.Response, error) {
-	s.throttle.Wait(req)
-	return s.getResponse(req)
 }
 
 // addRequest adds a request to the queue.
@@ -339,7 +335,7 @@ func (s *Spider) spawnIngestors(n int) {
 					return
 				case req := <-s.queue.Wait():
 					s.requestFunc(req)
-					res, err := s.handleRequest(req)
+					res, err := s.getResponse(req)
 					if err != nil {
 						s.errorFunc(err)
 						return

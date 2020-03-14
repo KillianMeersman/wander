@@ -145,20 +145,20 @@ func BenchmarkSpider(b *testing.B) {
 		if res.StatusCode != 200 {
 			b.Fatalf("server returned %d", res.StatusCode)
 		}
+	})
 
-		res.Find("a[href]").Each(func(i int, sel *goquery.Selection) {
-			link, ok := sel.Attr("href")
-			if ok {
-				err := spid.Follow(link, res, 10-res.Request.Depth())
-				if err != nil {
-					switch err.(type) {
-					case *request.QueueMaxSize:
-					default:
-						log.Fatal(err)
-					}
+	spid.OnHTML("a[href]", func(res *request.Response, el *goquery.Selection) {
+		link, ok := el.Attr("href")
+		if ok {
+			err := spid.Follow(link, res, 10-res.Request.Depth())
+			if err != nil {
+				switch err.(type) {
+				case *request.QueueMaxSize:
+				default:
+					log.Fatal(err)
 				}
 			}
-		})
+		}
 	})
 
 	spid.OnError(func(err error) {
