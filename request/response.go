@@ -9,9 +9,9 @@ import (
 // Response holds the original Request, as well as the http Response and goquery document.
 // Response instances can be searched by using qoquery methods.
 type Response struct {
-	Request *Request
-	*http.Response
-	*goquery.Document
+	Request    *Request
+	StatusCode int
+	goquery.Document
 }
 
 // NewResponse returns a Response. Returns an error if the response body could not be parsed by goquery.
@@ -20,7 +20,7 @@ func NewResponse(req *Request, res *http.Response) (*Response, error) {
 	doc, err := goquery.NewDocumentFromReader(res.Body)
 	return &Response{
 		req,
-		res,
-		doc,
+		res.StatusCode,
+		*doc,
 	}, err
 }

@@ -29,88 +29,6 @@ type SpiderConstructorOption func(s *Spider) error
 // It's possible to define your own RobotLimitFunction in order to e.a. ignore only certain limitations.
 type RobotLimitFunction func(spid *Spider, req *request.Request) error
 
-// handleRequest waits for any throttling, sends the request down the request channel and gets the response.
-func (s *Spider) handleRequest(req *request.Request, reqChannel chan *request.Request) (*request.Response, error) {
-	s.throttle.Wait(req)
-
-	select {
-	case s.reqc <- req:
-	default:
-	}
-
-	return s.getResponse(req)
-}
-
-// spawnIngestors spawns a new ingestor goroutine.
-// Ingestors make requests and do not handle pipelines as these often have blocking code (such as db calls).
-func (s *Spider) spawnIngestors(n int) {
-	s.ingestorWg.Add(n)
-	for i := 0; i < n; i++ {
-		go func() {
-			for {
-				select {
-				case <-s.stopIngestors:
-					s.ingestorWg.Done()
-					return
-				default:
-				}
-
-				req, ok := s.queue.Dequeue()
-				if ok {
-					res, err := s.handleRequest(req, s.reqc)
-					if err != nil {
-						select {
-						case s.errc <- err:
-						default:
-						}
-
-						continue
-					}
-
-					select {
-					case s.resc <- res:
-					default:
-					}
-
-				}
-			}
-		}()
-	}
-}
-
-// spawnPipelines spawns a new pipeline goroutine.
-// Pipelines handle document parsing and callbacks.
-func (s *Spider) spawnPipelines(n int) {
-	s.pipelineWg.Add(n)
-	for i := 0; i < n; i++ {
-		go func() {
-			for {
-				select {
-				case <-s.stopPipelines:
-					s.pipelineWg.Done()
-					return
-
-				case req := <-s.reqc:
-					s.requestFunc(req)
-
-				case res := <-s.resc:
-					s.responseFunc(res)
-					for selector, pipeline := range s.selectors {
-						res.Find(selector).Each(func(i int, el *goquery.Selection) {
-							pipeline(res, el)
-						})
-					}
-					s.pipelineDoneFunc()
-
-				case err := <-s.errc:
-					s.errorFunc(err)
-
-				}
-			}
-		}()
-	}
-}
-
 // SpiderState holds a spider's state, such as the request queue and cache.
 // It is returned by the Start and Resume methods, allowing the Resume method to resume a previously stopped crawl.
 type SpiderState struct {
@@ -122,7 +40,7 @@ type SpiderState struct {
 type Spider struct {
 	SpiderState
 	allowedDomains []*regexp.Regexp
-	RobotLimits    *robots.Cache
+	RobotLimits    *robots.RobotRules
 	limits         map[string]limits.RequestFilter
 	throttle       limits.ThrottleCollection
 
@@ -351,7 +269,7 @@ func (s *Spider) init() {
 		s.cache = request.NewCache()
 	}
 	if s.RobotLimits == nil {
-		s.RobotLimits = robots.NewCache()
+		s.RobotLimits = robots.NewRobotRules()
 	}
 }
 
@@ -382,24 +300,16 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 	return doc, nil
 }
 
-// GetRobotLimits downloads and parses the robots.txt file for a domain.
-// Respects the spider throttles.
-func (s *Spider) GetRobotLimits(req *request.Request) (*robots.Limits, error) {
+// handleRequest waits for any throttling, sends the request down the request channel and gets the response.
+func (s *Spider) handleRequest(req *request.Request, reqChannel chan *request.Request) (*request.Response, error) {
 	s.throttle.Wait(req)
-	res, err := s.client.Get(fmt.Sprintf("%s://%s/robots.txt", req.Scheme, req.Host))
-	if err != nil {
-		return nil, err
+
+	select {
+	case s.reqc <- req:
+	default:
 	}
 
-	defer res.Body.Close()
-	domainLimits, err := s.RobotLimits.AddLimits(res.Body, req.Host)
-	if err != nil {
-		return nil, robots.InvalidRobots{
-			Domain: req.Host,
-			Err:    err.Error(),
-		}
-	}
-	return domainLimits, nil
+	return s.getResponse(req)
 }
 
 // addRequest adds a request to the queue.
@@ -434,6 +344,100 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 	return nil
 }
 
+// spawnIngestors spawns a new ingestor goroutine.
+// Ingestors make requests and do not handle pipelines as these often have blocking code (such as db calls).
+func (s *Spider) spawnIngestors(n int) {
+	s.ingestorWg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			for {
+				select {
+				case <-s.stopIngestors:
+					s.ingestorWg.Done()
+					return
+				default:
+				}
+
+				req, err := s.queue.Dequeue()
+				if err != nil {
+					s.errc <- err
+					continue
+				}
+				if req != nil {
+					res, err := s.handleRequest(req, s.reqc)
+					if err != nil {
+						select {
+						case s.errc <- err:
+						default:
+						}
+
+						continue
+					}
+
+					select {
+					case s.resc <- res:
+					default:
+					}
+
+				}
+			}
+		}()
+	}
+}
+
+// spawnPipelines spawns a new pipeline goroutine.
+// Pipelines handle document parsing and callbacks.
+func (s *Spider) spawnPipelines(n int) {
+	s.pipelineWg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			for {
+				select {
+				case <-s.stopPipelines:
+					s.pipelineWg.Done()
+					return
+
+				case req := <-s.reqc:
+					s.requestFunc(req)
+
+				case res := <-s.resc:
+					s.responseFunc(res)
+					for selector, pipeline := range s.selectors {
+						res.Find(selector).Each(func(i int, el *goquery.Selection) {
+							pipeline(res, el)
+						})
+					}
+					s.pipelineDoneFunc()
+
+				case err := <-s.errc:
+					s.errorFunc(err)
+
+				}
+			}
+		}()
+	}
+}
+
+// DownloadRobotLimits downloads and parses the robots.txt file for a domain.
+// Respects the spider throttles.
+func (s *Spider) DownloadRobotLimits(req *request.Request) (*robots.RobotFile, error) {
+	s.throttle.Wait(req)
+	res, err := s.client.Get(fmt.Sprintf("%s://%s/robots.txt", req.Scheme, req.Host))
+	if err != nil {
+		return nil, err
+	}
+
+	defer res.Body.Close()
+	domainLimits, err := s.RobotLimits.AddLimits(res.Body, req.Host)
+	if err != nil {
+		return nil, robots.InvalidRobots{
+			Domain: req.Host,
+			Err:    err.Error(),
+		}
+	}
+	return domainLimits, nil
+}
+
 /*
 	Robots.txt interpretation functions
 */
@@ -447,9 +451,9 @@ func IgnoreRobotRules(s *Spider, req *request.Request) error {
 // FollowRobotRules fetches and follows the limitations imposed by the robots.txt file.
 // Implementation of RobotLimitFunction.
 func FollowRobotRules(s *Spider, req *request.Request) error {
-	rules, err := s.RobotLimits.GetLimits(req.Host)
+	rules, err := s.RobotLimits.GetRulesForHost(req.Host)
 	if err != nil {
-		rules, err = s.GetRobotLimits(req)
+		rules, err = s.DownloadRobotLimits(req)
 		if err != nil {
 			return err
 		}
@@ -461,7 +465,7 @@ func FollowRobotRules(s *Spider, req *request.Request) error {
 	}
 
 	// check crawl-delay
-	delay := rules.Delay(s.UserAgent, -1)
+	delay := rules.GetDelay(s.UserAgent, -1)
 	if delay > -1 {
 		// override spider throttle for this domain with the given crawl delay
 		s.throttle.SetDomainThrottle(limits.NewDomainThrottle(req.Host, delay))

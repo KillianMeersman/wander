@@ -8,42 +8,41 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/KillianMeersman/wander/request"
 )
 
-// RobotLimitCache holds the robot exclusions for multiple domains.
-type Cache struct {
-	limits map[string]*Limits
-	lock   sync.RWMutex
+// RobotRules holds the robot exclusions for multiple domains.
+type RobotRules struct {
+	hosts map[string]*RobotFile
+	lock  sync.RWMutex
 }
 
-func NewCache() *Cache {
-	return &Cache{
-		limits: make(map[string]*Limits),
-		lock:   sync.RWMutex{},
+// NewRobotRules instantiates a new robot limit cache.
+func NewRobotRules() *RobotRules {
+	return &RobotRules{
+		hosts: make(map[string]*RobotFile),
+		lock:  sync.RWMutex{},
 	}
 }
 
 // Allowed returns true if the userAgent is allowed to access the given path on the given domain.
 // Returns error if no robot file is cached for the given domain.
-func (c *Cache) Allowed(userAgent string, req *request.Request) (bool, error) {
+func (c *RobotRules) Allowed(userAgent string, url *url.URL) (bool, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
-	limits, ok := c.limits[req.Host]
+	limits, ok := c.hosts[url.Host]
 	if !ok {
-		return false, fmt.Errorf("No limits found for domain %s", req.Host)
+		return false, fmt.Errorf("No limits found for domain %s", url.Host)
 	}
-	return limits.Allowed(userAgent, req.Path), nil
+	return limits.Allowed(userAgent, url.Path), nil
 }
 
-// GetLimits gets the limits for a host. Returns an error when no limits are cached for the given host.
-func (c *Cache) GetLimits(host string) (*Limits, error) {
+// GetRulesForHost gets the rules for a host. Returns an error when no limits are cached for the given host.
+func (c *RobotRules) GetRulesForHost(host string) (*RobotFile, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
-	limits, ok := c.limits[host]
+	limits, ok := c.hosts[host]
 	if !ok {
 		return nil, fmt.Errorf("No limits found for domain %s", host)
 	}
@@ -51,7 +50,7 @@ func (c *Cache) GetLimits(host string) (*Limits, error) {
 }
 
 // AddLimits adds or replaces the limits for a host. Returns an error if the limits are invalid.
-func (c *Cache) AddLimits(in io.Reader, host string) (*Limits, error) {
+func (c *RobotRules) AddLimits(in io.Reader, host string) (*RobotFile, error) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -60,43 +59,36 @@ func (c *Cache) AddLimits(in io.Reader, host string) (*Limits, error) {
 		return nil, err
 	}
 
-	c.limits[host] = limits
+	c.hosts[host] = limits
 	return limits, nil
 }
 
-// Limits holds all the limits imposed by a robots exclusion file.
-type Limits struct {
-	defaultLimits *Group
-	groups        map[string]*Group
+// RobotFile holds all the information in a robots exclusion file.
+type RobotFile struct {
+	defaultLimits *UserAgentRules
+	groups        map[string]*UserAgentRules
 	sitemap       *url.URL
 }
 
-func newLimits() *Limits {
-	return &Limits{
-		groups: make(map[string]*Group, 0),
+func newRobotFile() *RobotFile {
+	return &RobotFile{
+		groups: make(map[string]*UserAgentRules, 0),
 	}
 }
 
-func FromResponse(res *request.Response) (*Limits, error) {
-	return nil, nil
-}
-
-// FromReader will parse a robot exclusion file, returns a normal error if it encounters an invalid directive.
-func FromReader(in io.Reader) (*Limits, error) {
+// FromReader will parse a robot exclusion file from an io.Reader.
+// Returns a default error if it encounters an invalid directive.
+func FromReader(in io.Reader) (*RobotFile, error) {
 	scanner := bufio.NewScanner(in)
-	limits := newLimits()
+	limits := newRobotFile()
 
 	// current host specification
-	group := newGroup("*")
+	rules := newUserAgentRules("*")
 	for scanner.Scan() {
 		line := strings.Trim(scanner.Text(), " \t")
 
-		// ignore empty lines
-		if len(line) < 1 {
-			continue
-		}
-		// skip if line is comment
-		if line[0] == '#' {
+		// ignore empty lines or comments
+		if len(line) < 1 || line[0] == '#' {
 			continue
 		}
 
@@ -108,29 +100,34 @@ func FromReader(in io.Reader) (*Limits, error) {
 		directive := parts[0]
 		parameter := ""
 		if len(parts) > 1 {
+			// Trim parameter of leading spaces
 			parameter = strings.TrimPrefix(parts[1], " ")
 		}
 
+		// Match directive
 		switch strings.ToLower(directive) {
 		case "user-agent":
 			if parameter == "" {
 				return nil, fmt.Errorf("Invalid User-agent directive %s", line)
 			}
-			limits.addGroup(group)
-			group = newGroup(parameter)
+			// Add the current user-agent rules to the RobotFile and begin a new UserAgentRules.
+			limits.addUserAgentRules(rules)
+			rules = newUserAgentRules(parameter)
 
 		case "disallow":
 			if parameter == "" {
-				group.disallowed = make([]string, 0)
+				// Reset the disallowed on empty string
+				rules.disallowed = make([]string, 0)
 			} else {
-				group.disallowed = append(group.disallowed, parameter)
+				rules.disallowed = append(rules.disallowed, parameter)
 			}
 
 		case "allow":
 			if parameter == "" {
-				group.allowed = make([]string, 0)
+				// Reset the allowed on empty string
+				rules.allowed = make([]string, 0)
 			} else {
-				group.allowed = append(group.allowed, parameter)
+				rules.allowed = append(rules.allowed, parameter)
 			}
 
 		case "crawl-delay":
@@ -139,9 +136,9 @@ func FromReader(in io.Reader) (*Limits, error) {
 				return nil, err
 			}
 			if dur.Seconds() < 0 {
-				return nil, fmt.Errorf("negative crawl-delay not allowed")
+				return nil, fmt.Errorf("Negative crawl-delay not allowed")
 			}
-			group.delay = dur
+			rules.delay = dur
 
 		case "sitemap":
 			url, err := url.Parse(parameter)
@@ -151,14 +148,15 @@ func FromReader(in io.Reader) (*Limits, error) {
 			limits.sitemap = url
 
 		default:
+			// Unknown directive, ignore
 			continue
 		}
 	}
-	limits.addGroup(group)
+	limits.addUserAgentRules(rules)
 	return limits, nil
 }
 
-func (l *Limits) addGroup(g *Group) {
+func (l *RobotFile) addUserAgentRules(g *UserAgentRules) {
 	if g.userAgent == "*" {
 		l.defaultLimits = g
 		return
@@ -167,7 +165,7 @@ func (l *Limits) addGroup(g *Group) {
 }
 
 // Allowed returns true if the user agent is allowed to access the given url.
-func (l *Limits) Allowed(userAgent, url string) bool {
+func (l *RobotFile) Allowed(userAgent, url string) bool {
 	group, ok := l.groups[userAgent]
 	if ok {
 		return group.Allowed(url)
@@ -175,9 +173,9 @@ func (l *Limits) Allowed(userAgent, url string) bool {
 	return l.defaultLimits.Allowed(url)
 }
 
-// GetLimits gets the Group for the userAgent, returns the default (*) group if it was present and no other groups apply.
+// GetUserAgentRules gets the rules for the userAgent, returns the default (*) group if it was present and no other groups apply.
 // Returns nil if no groups apply and no default group was supplied.
-func (l *Limits) GetLimits(userAgent string) *Group {
+func (l *RobotFile) GetUserAgentRules(userAgent string) *UserAgentRules {
 	for _, group := range l.groups {
 		if group.userAgent == userAgent {
 			return group
@@ -186,28 +184,28 @@ func (l *Limits) GetLimits(userAgent string) *Group {
 	return l.defaultLimits
 }
 
-// Delay returns the User-agent specific crawl-delay if it exists, otherwise the catch-all delay.
+// GetDelay returns the User-agent specific crawl-delay if it exists, otherwise the catch-all delay.
 // Returns def if neither a specific or global crawl-delay exist.
-func (l *Limits) Delay(userAgent string, def time.Duration) time.Duration {
-	return l.GetLimits(userAgent).Delay(def)
+func (l *RobotFile) GetDelay(userAgent string, defaultDelay time.Duration) time.Duration {
+	return l.GetUserAgentRules(userAgent).GetDelay(defaultDelay)
 }
 
 // Sitemap returns the URL to the sitemap for the given User-agent.
 // Returns the default sitemap if not User-agent specific sitemap was specified, otherwise nil.
-func (l *Limits) Sitemap(userAgent string) *url.URL {
+func (l *RobotFile) Sitemap(userAgent string) *url.URL {
 	return l.sitemap
 }
 
-// Group holds the limits for a single user agent
-type Group struct {
+// UserAgentRules holds limits for a single user agent.
+type UserAgentRules struct {
 	userAgent  string
 	allowed    []string
 	disallowed []string
 	delay      time.Duration
 }
 
-func newGroup(userAgent string) *Group {
-	return &Group{
+func newUserAgentRules(userAgent string) *UserAgentRules {
+	return &UserAgentRules{
 		userAgent:  userAgent,
 		allowed:    make([]string, 0),
 		disallowed: make([]string, 0),
@@ -216,12 +214,12 @@ func newGroup(userAgent string) *Group {
 }
 
 // Applies returns true if the group applies to the given userAgent
-func (g *Group) Applies(userAgent string) bool {
+func (g *UserAgentRules) Applies(userAgent string) bool {
 	return g.userAgent == userAgent
 }
 
 // Allowed returns true if the url is allowed by the group rules. Check if the group applies to the user agent first by using Applies.
-func (g *Group) Allowed(url string) bool {
+func (g *UserAgentRules) Allowed(url string) bool {
 	for _, rule := range g.allowed {
 		if MatchURLRule(rule, url) {
 			return true
@@ -236,10 +234,11 @@ func (g *Group) Allowed(url string) bool {
 	return true
 }
 
-// Delay returns the Crawl-delay. Returns defs if no crawl delay was specified.
-func (g *Group) Delay(def time.Duration) time.Duration {
+// GetDelay returns the Crawl-delay.
+// Returns defaultDelay if no crawl delay was specified.
+func (g *UserAgentRules) GetDelay(defaultDelay time.Duration) time.Duration {
 	if g.delay == -1 {
-		return def
+		return defaultDelay
 	}
 	return g.delay
 }

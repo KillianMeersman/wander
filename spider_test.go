@@ -177,5 +177,9 @@ func BenchmarkSpider(b *testing.B) {
 	spid.Start()
 	spid.Wait()
 
-	b.Logf("Visited %d, received %d responses. Queue size is %d", reqn, resn, queue.Count())
+	count, err := queue.Count()
+	if err != nil {
+		log.Fatal(err)
+	}
+	b.Logf("Visited %d, received %d responses. Queue size is %d", reqn, resn, count)
 }

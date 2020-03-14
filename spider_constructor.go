@@ -121,7 +121,7 @@ func Cache(cache request.Cache) SpiderConstructorOption {
 }
 
 // RobotLimits sets the robot exclusion cache.
-func RobotLimits(limits *robots.Cache) SpiderConstructorOption {
+func RobotLimits(limits *robots.RobotRules) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.RobotLimits = limits
 		return nil

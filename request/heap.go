@@ -7,9 +7,13 @@ import (
 
 // Queue is a prioritized FIFO queue for requests
 type Queue interface {
+	// Enqueue adds the request to the queue, returns an error if no more space is available.
 	Enqueue(req *Request, priority int) error
-	Dequeue() (*Request, bool)
-	Count() int
+	// Dequeue pops the highest priority request from the queue.
+	// Returns an error if requests could not be dequeued.
+	Dequeue() (*Request, error)
+	// Count returns the amount of queued requests.
+	Count() (int, error)
 }
 
 // QueueMaxSize signals the Queue has reached its maximum size.
@@ -84,14 +88,14 @@ func (r *Heap) Enqueue(req *Request, priority int) error {
 }
 
 // Dequeue a request.
-func (r *Heap) Dequeue() (*Request, bool) {
+func (r *Heap) Dequeue() (*Request, error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
 	if r.count > 0 {
-		return r.extract(), true
+		return r.extract(), nil
 	}
-	return nil, false
+	return nil, nil
 }
 
 // Peek returns the next request without removing it from the queue.
@@ -101,8 +105,8 @@ func (r *Heap) Peek() *Request {
 
 // Count returns the amount of requests in the queue.
 // Returns nil when no requests are in the heap.
-func (r *Heap) Count() int {
-	return r.count
+func (r *Heap) Count() (int, error) {
+	return r.count, nil
 }
 
 // insert a request.
