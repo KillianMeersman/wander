@@ -7,7 +7,7 @@ import (
 
 // AlreadyVisited is thrown when a request's URL has been visited before by the spider.
 type AlreadyVisited struct {
-	URL *url.URL
+	URL url.URL
 }
 
 func (e AlreadyVisited) Error() string {

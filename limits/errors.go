@@ -19,7 +19,7 @@ func (m *MaxDepthReached) Error() string {
 
 // ForbiddenDomain indicates a request's URL points to a domain not in the spider's allowed domains.
 type ForbiddenDomain struct {
-	URL *url.URL
+	URL url.URL
 }
 
 func (e ForbiddenDomain) Error() string {

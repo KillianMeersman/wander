@@ -7,7 +7,7 @@ import (
 
 // Request contains the to-be-visited URL as well as the origin domain.
 type Request struct {
-	*url.URL
+	url.URL
 	sourceHost string
 	depth      int
 }
@@ -34,7 +34,7 @@ func NewRequest(path string, parent *Request) (*Request, error) {
 	}
 
 	return &Request{
-		newURL,
+		*newURL,
 		hostname,
 		depth,
 	}, nil

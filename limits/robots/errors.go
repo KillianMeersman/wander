@@ -17,7 +17,7 @@ func (e InvalidRobots) Error() string {
 
 // RobotDenied indicates a request was denied by a site's robots.txt file.
 type RobotDenied struct {
-	URL *url.URL
+	URL url.URL
 }
 
 func (e RobotDenied) Error() string {
