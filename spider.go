@@ -48,17 +48,11 @@ type Spider struct {
 	ingestorN int
 	pipelineN int
 
-	stopIngestors chan struct{}
-	stopPipelines chan struct{}
-	ingestorWg    *sync.WaitGroup
-	pipelineWg    *sync.WaitGroup
+	done       chan struct{}
+	ingestorWg *sync.WaitGroup
 
-	reqc        chan *request.Request
-	resc        chan *request.Response
-	errc        chan error
-	lock        *sync.Mutex
-	running     bool
-	runningCond *sync.Cond
+	lock      *sync.Mutex
+	isRunning bool
 
 	// callbacks
 	requestFunc      func(*request.Request)
@@ -175,7 +169,7 @@ func (s *Spider) VisitNow(path string) (*request.Response, error) {
 		return nil, err
 	}
 
-	return s.handleRequest(req, s.reqc)
+	return s.handleRequest(req)
 }
 
 // Follow a link by adding the path to the queue, blocks when the queue is full until there is free space.
@@ -190,21 +184,19 @@ func (s *Spider) Follow(path string, res *request.Response, priority int) error 
 }
 
 // start the spider by spawning all required ingestors/pipelines
-// This method is idempotent and will return without doing anything if the spider is already running.
+// This method is idempotent and will return without doing anything if the spider is already isRunning.
 func (s *Spider) start() {
-	if s.running {
+	if s.isRunning {
 		return
 	}
-	s.running = true
+	s.isRunning = true
 
-	s.stopIngestors = make(chan struct{})
-	s.stopPipelines = make(chan struct{})
+	s.done = make(chan struct{})
 	s.spawnIngestors(s.ingestorN)
-	s.spawnPipelines(s.pipelineN)
 }
 
 // Start the spider.
-// This method is idempotent and will return without doing anything if the spider is already running.
+// This method is idempotent and will return without doing anything if the spider is already isRunning.
 func (s *Spider) Start() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -212,7 +204,7 @@ func (s *Spider) Start() {
 }
 
 // Resume from spider state.
-// This method is idempotent and will return without doing anything if the spider is already running.
+// This method is idempotent and will return without doing anything if the spider is already isRunning.
 func (s *Spider) Resume(ctx context.Context, state *SpiderState) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -220,40 +212,36 @@ func (s *Spider) Resume(ctx context.Context, state *SpiderState) {
 	s.start()
 }
 
-// Stop the spider if it is currently running, returns a SpiderState to allow a later call to Resume.
+// Stop the spider if it is currently isRunning, returns a SpiderState to allow a later call to Resume.
 // Accepts a context and will forcibly stop the spider if cancelled, regardless of status.
-// This method is idempotent and will return without doing anything if the spider is not running.
+// This method is idempotent and will return without doing anything if the spider is not isRunning.
 func (s *Spider) Stop(ctx context.Context) *SpiderState {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if !s.running {
+	if !s.isRunning {
 		return &s.SpiderState
 	}
-	s.running = false
+	s.isRunning = false
 
 	ctx, cancel := context.WithCancel(ctx)
 
 	go func(cancel context.CancelFunc) {
-		close(s.stopIngestors)
+		close(s.done)
 		s.ingestorWg.Wait()
-		close(s.stopPipelines)
-		s.pipelineWg.Wait()
 		cancel()
 	}(cancel)
 
 	<-ctx.Done()
-	s.runningCond.Broadcast()
 	return &s.SpiderState
 }
 
 // Wait blocks until the spider has been stopped.
 func (s *Spider) Wait() {
-	s.lock.Lock()
-	for s.running {
-		s.runningCond.Wait()
+	if !s.isRunning {
+		return
 	}
-	s.lock.Unlock()
+	<-s.done
 }
 
 /*
@@ -301,14 +289,8 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 }
 
 // handleRequest waits for any throttling, sends the request down the request channel and gets the response.
-func (s *Spider) handleRequest(req *request.Request, reqChannel chan *request.Request) (*request.Response, error) {
+func (s *Spider) handleRequest(req *request.Request) (*request.Response, error) {
 	s.throttle.Wait(req)
-
-	select {
-	case s.reqc <- req:
-	default:
-	}
-
 	return s.getResponse(req)
 }
 
@@ -352,47 +334,16 @@ func (s *Spider) spawnIngestors(n int) {
 		go func() {
 			for {
 				select {
-				case <-s.stopIngestors:
+				case <-s.done:
 					s.ingestorWg.Done()
 					return
 				case req := <-s.queue.Wait():
-					res, err := s.handleRequest(req, s.reqc)
-					if err != nil {
-						select {
-						case s.errc <- err:
-						default:
-						}
-						continue
-					}
-
-					select {
-					case s.resc <- res:
-					default:
-					}
-
-				}
-
-			}
-		}()
-	}
-}
-
-// spawnPipelines spawns a new pipeline goroutine.
-// Pipelines handle document parsing and callbacks.
-func (s *Spider) spawnPipelines(n int) {
-	s.pipelineWg.Add(n)
-	for i := 0; i < n; i++ {
-		go func() {
-			for {
-				select {
-				case <-s.stopPipelines:
-					s.pipelineWg.Done()
-					return
-
-				case req := <-s.reqc:
 					s.requestFunc(req)
-
-				case res := <-s.resc:
+					res, err := s.handleRequest(req)
+					if err != nil {
+						s.errorFunc(err)
+						return
+					}
 					s.responseFunc(res)
 					for selector, pipeline := range s.selectors {
 						res.Find(selector).Each(func(i int, el *goquery.Selection) {
@@ -400,11 +351,8 @@ func (s *Spider) spawnPipelines(n int) {
 						})
 					}
 					s.pipelineDoneFunc()
-
-				case err := <-s.errc:
-					s.errorFunc(err)
-
 				}
+
 			}
 		}()
 	}

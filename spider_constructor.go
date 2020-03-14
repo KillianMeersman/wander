@@ -15,26 +15,19 @@ import (
 // NewSpider instantiates a new spider.
 func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 	lock := &sync.Mutex{}
-	cond := sync.NewCond(lock)
 	spider := &Spider{
 		SpiderState:    SpiderState{},
 		allowedDomains: make([]*regexp.Regexp, 0),
 		limits:         make(map[string]limits.RequestFilter),
 
-		pipelineN: 1,
 		ingestorN: 1,
 
 		client:                 &http.Client{},
 		UserAgent:              "WanderBot",
 		RobotExclusionFunction: FollowRobotRules,
 
-		ingestorWg:  &sync.WaitGroup{},
-		pipelineWg:  &sync.WaitGroup{},
-		reqc:        make(chan *request.Request),
-		resc:        make(chan *request.Response),
-		errc:        make(chan error),
-		lock:        lock,
-		runningCond: cond,
+		ingestorWg: &sync.WaitGroup{},
+		lock:       lock,
 
 		requestFunc:      func(req *request.Request) {},
 		responseFunc:     func(res *request.Response) {},
@@ -78,7 +71,7 @@ func Pipelines(n int) SpiderConstructorOption {
 	}
 }
 
-// Threads sets the amount of ingestors and pipelines to n, spawning a total of n*2 goroutines.
+// Threads sets the amount of ingestors goroutines.
 func Threads(n int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.ingestorN = n
