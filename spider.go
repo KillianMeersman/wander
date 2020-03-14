@@ -192,7 +192,7 @@ func (s *Spider) start() {
 	s.isRunning = true
 
 	s.done = make(chan struct{})
-	s.spawnIngestors(s.ingestorN)
+	s.spawn(s.ingestorN)
 }
 
 // Start the spider.
@@ -224,15 +224,18 @@ func (s *Spider) Stop(ctx context.Context) *SpiderState {
 	}
 	s.isRunning = false
 
-	ctx, cancel := context.WithCancel(ctx)
-
-	go func(cancel context.CancelFunc) {
-		close(s.done)
+	close(s.done)
+	done := make(chan struct{})
+	go func() {
 		s.ingestorWg.Wait()
-		cancel()
-	}(cancel)
+		close(done)
+	}()
 
-	<-ctx.Done()
+	// Wait for the ingestors to stop or the context to cancel.
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 	return &s.SpiderState
 }
 
@@ -322,9 +325,9 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 	return nil
 }
 
-// spawnIngestors spawns a new ingestor goroutine.
-// Ingestors make requests and do not handle pipelines as these often have blocking code (such as db calls).
-func (s *Spider) spawnIngestors(n int) {
+// spawn spawns a new ingestor goroutine.
+// Ingestors make requests and handle callbacks.
+func (s *Spider) spawn(n int) {
 	s.ingestorWg.Add(n)
 	for i := 0; i < n; i++ {
 		go func() {
