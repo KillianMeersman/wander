@@ -41,6 +41,7 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 		errorFunc:        func(err error) {},
 		selectors:        make(map[string]func(*request.Response, *goquery.Selection)),
 		pipelineDoneFunc: func() {},
+		throttle:         limits.NewThrottleCollection(nil),
 	}
 
 	for _, option := range options {

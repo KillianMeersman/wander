@@ -50,6 +50,11 @@ func (t *ThrottleCollection) Wait(req *request.Request) {
 	}
 }
 
+// Applies returns true if the path matches the Throttle domain regex
+func (t *ThrottleCollection) Applies(_ *request.Request) bool {
+	return true
+}
+
 // SetDomainThrottle sets a domain throttle.
 // Will overwrite existing domain throttle if it already exists.
 func (t *ThrottleCollection) SetDomainThrottle(throttle *DomainThrottle) {

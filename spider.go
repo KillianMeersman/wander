@@ -355,22 +355,13 @@ func (s *Spider) spawnIngestors(n int) {
 				case <-s.stopIngestors:
 					s.ingestorWg.Done()
 					return
-				default:
-				}
-
-				req, err := s.queue.Dequeue()
-				if err != nil {
-					s.errc <- err
-					continue
-				}
-				if req != nil {
+				case req := <-s.queue.Wait():
 					res, err := s.handleRequest(req, s.reqc)
 					if err != nil {
 						select {
 						case s.errc <- err:
 						default:
 						}
-
 						continue
 					}
 
@@ -380,6 +371,7 @@ func (s *Spider) spawnIngestors(n int) {
 					}
 
 				}
+
 			}
 		}()
 	}
