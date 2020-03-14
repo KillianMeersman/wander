@@ -251,21 +251,8 @@ func (s *Spider) Wait() {
 	Private methods
 */
 
-// init sets some spider fields to default values if none were supplied.
-func (s *Spider) init() {
-	if s.queue == nil {
-		s.queue = request.NewHeap(10000)
-	}
-	if s.cache == nil {
-		s.cache = request.NewCache()
-	}
-	if s.RobotLimits == nil {
-		s.RobotLimits = robots.NewRobotRules()
-	}
-}
-
-// filterDomains returns true if the spider is allowed to visit the domain.
-func (s *Spider) filterDomains(request *request.Request) bool {
+// filterRequestDomain returns true if the spider is allowed to visit the domain.
+func (s *Spider) filterRequestDomain(request *request.Request) bool {
 	for _, domain := range s.allowedDomains {
 		if domain.MatchString(request.Host) {
 			return true
@@ -295,7 +282,7 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 
 // addRequest adds a request to the queue.
 func (s *Spider) addRequest(req *request.Request, priority int) error {
-	if !s.filterDomains(req) {
+	if !s.filterRequestDomain(req) {
 		return limits.ForbiddenDomain{req.URL}
 	}
 

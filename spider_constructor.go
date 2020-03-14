@@ -42,7 +42,16 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 			return nil, err
 		}
 	}
-	spider.init()
+
+	if spider.queue == nil {
+		spider.queue = request.NewHeap(10000)
+	}
+	if spider.cache == nil {
+		spider.cache = request.NewCache()
+	}
+	if spider.RobotLimits == nil {
+		spider.RobotLimits = robots.NewRobotRules()
+	}
 
 	return spider, nil
 }
@@ -58,14 +67,6 @@ func AllowedDomains(domains ...string) SpiderConstructorOption {
 func Ingestors(n int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.ingestorN = n
-		return nil
-	}
-}
-
-// Pipelines sets the amount of goroutines for callback functions.
-func Pipelines(n int) SpiderConstructorOption {
-	return func(s *Spider) error {
-		s.pipelineN = n
 		return nil
 	}
 }
