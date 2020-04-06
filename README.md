@@ -6,6 +6,7 @@ Based on Colly and Scrapy, Wander aims to provide an easy-to-use API while also 
 
 ## Features
 * Prioritized request queueing.
+* Redis support for distributed scraping.
 * Easy parallelization of crawlers and pipelines.
 * Stop, save and resume crawls.
 * Global and per-domain throttling.
@@ -13,7 +14,6 @@ Based on Colly and Scrapy, Wander aims to provide an easy-to-use API while also 
 * Support for robots.txt, including non-standard directives and custom filter functions (e.a. ignore certain rules).
 
 ## Roadmap
-* Support for Redis, allowing distributed scraping.
 * Sitemap support.
 
 ## Example

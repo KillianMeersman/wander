@@ -6,17 +6,13 @@ import (
 	"github.com/KillianMeersman/wander/request"
 )
 
-// Throttle specifies an interface all throttles must comply with.
+// Throttle is used to limit the rate of requests.
 type Throttle interface {
 	Wait(*request.Request)
+	Applies(*request.Request) bool
 }
 
-type specificThrottle interface {
-	wait()
-	delay() time.Duration
-}
-
-// ThrottleCollection combines throttles to use the most approriate one for the request
+// ThrottleCollection combines a default and domain specific throttles.
 type ThrottleCollection struct {
 	defaultThrottle *DefaultThrottle
 	domainThrottles map[string]*DomainThrottle
@@ -35,7 +31,7 @@ func NewThrottleCollection(defaultThrottle *DefaultThrottle, domainThrottles ...
 	return col
 }
 
-func (t *ThrottleCollection) getThrottle(req *request.Request) specificThrottle {
+func (t *ThrottleCollection) getThrottle(req *request.Request) Throttle {
 	throttle, ok := t.domainThrottles[req.Host]
 	if ok {
 		return throttle
@@ -50,11 +46,17 @@ func (t *ThrottleCollection) getThrottle(req *request.Request) specificThrottle 
 func (t *ThrottleCollection) Wait(req *request.Request) {
 	throttle := t.getThrottle(req)
 	if throttle != nil {
-		throttle.wait()
+		throttle.Wait(req)
 	}
 }
 
+// Applies returns true if the path matches the Throttle domain regex
+func (t *ThrottleCollection) Applies(_ *request.Request) bool {
+	return true
+}
+
 // SetDomainThrottle sets a domain throttle.
+// Will overwrite existing domain throttle if it already exists.
 func (t *ThrottleCollection) SetDomainThrottle(throttle *DomainThrottle) {
 	t.domainThrottles[throttle.domain] = throttle
 }
@@ -74,31 +76,22 @@ func NewDefaultThrottle(delay time.Duration) *DefaultThrottle {
 }
 
 // Applies returns true if the path matches the Throttle domain regex
-func (t *DefaultThrottle) applies(path string) bool {
+func (t *DefaultThrottle) Applies(_ *request.Request) bool {
 	return true
 }
 
 // Wait for the throttle
-func (t *DefaultThrottle) wait() {
+func (t *DefaultThrottle) Wait(_ *request.Request) {
 	<-t.ticker.C
 }
 
-func (t *DefaultThrottle) delay() time.Duration {
-	return t.interval
-}
-
-// DomainThrottle will only throttle certain domains
+// DomainThrottle will throttle a specific domain.
 type DomainThrottle struct {
 	DefaultThrottle
 	domain string
 }
 
-// Applies returns true if the path matches the Throttle domain regex
-func (t *DomainThrottle) applies(req *request.Request) bool {
-	return t.domain == req.Host
-}
-
-// NewDomainThrottle will only throttle certain domains
+// NewDomainThrottle instantiates a new domain throttle.
 func NewDomainThrottle(domain string, delay time.Duration) *DomainThrottle {
 	throttle := NewDefaultThrottle(delay)
 
@@ -106,4 +99,9 @@ func NewDomainThrottle(domain string, delay time.Duration) *DomainThrottle {
 		*throttle,
 		domain,
 	}
+}
+
+// Applies returns true if the path matches the Throttle domain.
+func (t *DomainThrottle) Applies(req *request.Request) bool {
+	return t.domain == req.Host
 }

@@ -34,6 +34,7 @@ func TestRequestHeapEqualPriority(t *testing.T) {
 	}
 
 	heap := request.NewHeap(10000)
+	defer heap.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +47,8 @@ func TestRequestHeapEqualPriority(t *testing.T) {
 	}
 
 	for _, a := range requests {
-		b, _ := heap.Dequeue()
-		if a != b {
+		b := <-heap.Dequeue()
+		if a != b.Request {
 			t.Fatal("requests dequeued in incorrect order")
 		}
 	}
@@ -60,6 +61,7 @@ func TestRequestHeapDifferentPriority(t *testing.T) {
 	}
 
 	heap := request.NewHeap(1001)
+	defer heap.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,8 +74,73 @@ func TestRequestHeapDifferentPriority(t *testing.T) {
 	}
 
 	for i := 999; i >= 0; i-- {
-		req, _ := heap.Dequeue()
-		if req != requests[i] {
+		req := <-heap.Dequeue()
+		if req.Request != requests[i] {
+			t.Fatal("requests dequeued in incorrect order")
+		}
+	}
+}
+
+func TestRequestRedisEqualPriority(t *testing.T) {
+	requests, err := randomRequests(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	queue, err := request.NewRedisQueue("localhost", 6379, "", "requests", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Clear()
+	defer queue.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, req := range requests {
+		err := queue.Enqueue(req, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _ = range requests {
+		b := <-queue.Dequeue()
+		if b.Error != nil {
+			t.Fatal(b.Error)
+		}
+	}
+}
+
+func TestRequestRedisDifferentPriority(t *testing.T) {
+	requests, err := randomRequests(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	queue, err := request.NewRedisQueue("localhost", 6379, "", "requests", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Clear()
+	defer queue.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, req := range requests {
+		err := queue.Enqueue(req, i)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := 999; i >= 0; i-- {
+		req := <-queue.Dequeue()
+		if req.Error != nil {
+			t.Fatal(req.Error)
+		}
+		if *req.Request != *requests[i] {
 			t.Fatal("requests dequeued in incorrect order")
 		}
 	}

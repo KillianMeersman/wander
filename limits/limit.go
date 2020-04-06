@@ -1,36 +1,32 @@
+// Package limits provides request filters and throttles.
 package limits
 
 import (
-	"fmt"
-
 	"github.com/KillianMeersman/wander/request"
 )
 
-// Limit interface filters requests when they are enqueued
-type Limit interface {
+// RequestFilter is used to filter request before they are enqueued.
+type RequestFilter interface {
 	// FilterRequest filters a request before it is enqueued
 	FilterRequest(req *request.Request) error
 }
 
-// MaxDepthLimit will filter a request if it's depth > max
-type MaxDepthLimit struct {
-	Max int
+// MaxDepthFilter will filter a request if it's depth is larger than the maximum.
+type MaxDepthFilter struct {
+	MaxDepth int
 }
 
-// MaxDepth will filter a request if it's depth > max
-func MaxDepth(max int) *MaxDepthLimit {
-	return &MaxDepthLimit{
-		max,
+// NewMaxDepthFilter instantiates a new max depth filter.
+func NewMaxDepthFilter(maxDepth int) *MaxDepthFilter {
+	return &MaxDepthFilter{
+		maxDepth,
 	}
 }
 
-func (m *MaxDepthLimit) FilterRequest(req *request.Request) error {
-	if req.Depth() > m.Max {
-		return fmt.Errorf("Maximum depth reached (%d)", m.Max)
+// FilterRequest returns an
+func (m *MaxDepthFilter) FilterRequest(req *request.Request) error {
+	if req.Depth > m.MaxDepth {
+		return &MaxDepthReached{Depth: m.MaxDepth, Request: req}
 	}
 	return nil
-}
-
-func (m *MaxDepthLimit) ID() string {
-	return fmt.Sprintf("MaxDepthLimit-%d", m.Max)
 }

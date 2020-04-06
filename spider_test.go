@@ -117,8 +117,23 @@ func TestSyncVisit(t *testing.T) {
 	}
 }
 
-func BenchmarkSpider(b *testing.B) {
-	queue := request.NewHeap(b.N * 3)
+func BenchmarkSpiderWithHeapQueue(b *testing.B) {
+	queue := request.NewHeap(10000)
+	benchmarkSpider(b, queue)
+}
+
+func BenchmarkSpiderWithRedisQueue(b *testing.B) {
+	queue, err := request.NewRedisQueue("localhost", 6379, "", "requests", 0)
+	if err != nil {
+		b.Fatal(err)
+	}
+	benchmarkSpider(b, queue)
+}
+
+func benchmarkSpider(b *testing.B, queue request.Queue) {
+	defer queue.Clear()
+	defer queue.Close()
+
 	spid, err := wander.NewSpider(
 		wander.AllowedDomains("127.0.0.1", "localhost"),
 		wander.Threads(6),
@@ -145,20 +160,20 @@ func BenchmarkSpider(b *testing.B) {
 		if res.StatusCode != 200 {
 			b.Fatalf("server returned %d", res.StatusCode)
 		}
+	})
 
-		res.Find("a[href]").Each(func(i int, sel *goquery.Selection) {
-			link, ok := sel.Attr("href")
-			if ok {
-				err := spid.Follow(link, res, 10-res.Request.Depth())
-				if err != nil {
-					switch err.(type) {
-					case *request.QueueMaxSize:
-					default:
-						log.Fatal(err)
-					}
+	spid.OnHTML("a[href]", func(res *request.Response, el *goquery.Selection) {
+		link, ok := el.Attr("href")
+		if ok {
+			err := spid.Follow(link, res, 10-res.Request.Depth)
+			if err != nil {
+				switch err.(type) {
+				case *request.QueueMaxSize:
+				default:
+					log.Fatal(err)
 				}
 			}
-		})
+		}
 	})
 
 	spid.OnError(func(err error) {
@@ -177,5 +192,9 @@ func BenchmarkSpider(b *testing.B) {
 	spid.Start()
 	spid.Wait()
 
-	b.Logf("Visited %d, received %d responses. Queue size is %d", reqn, resn, queue.Count())
+	count, err := queue.Count()
+	if err != nil {
+		log.Fatal(err)
+	}
+	b.Logf("Visited %d, received %d responses. Queue size is %d", reqn, resn, count)
 }
