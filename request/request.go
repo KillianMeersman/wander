@@ -8,8 +8,8 @@ import (
 // Request contains the to-be-visited URL as well as the origin domain.
 type Request struct {
 	url.URL
-	sourceHost string
-	depth      int
+	SourceHost string
+	Depth      int
 }
 
 // NewRequest will return a Request with absolute URL, converting relative URL's to absolute ones as needed.
@@ -30,17 +30,12 @@ func NewRequest(path string, parent *Request) (*Request, error) {
 		}
 
 		hostname = parent.Host
-		depth = parent.depth + 1
+		depth = parent.Depth + 1
 	}
 
 	return &Request{
-		*newURL,
-		hostname,
-		depth,
+		URL:        *newURL,
+		SourceHost: hostname,
+		Depth:      depth,
 	}, nil
-}
-
-// Depth returns the request depth.
-func (r *Request) Depth() int {
-	return r.depth
 }

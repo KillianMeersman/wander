@@ -25,7 +25,7 @@ func NewMaxDepthFilter(maxDepth int) *MaxDepthFilter {
 
 // FilterRequest returns an
 func (m *MaxDepthFilter) FilterRequest(req *request.Request) error {
-	if req.Depth() > m.MaxDepth {
+	if req.Depth > m.MaxDepth {
 		return &MaxDepthReached{Depth: m.MaxDepth, Request: req}
 	}
 	return nil

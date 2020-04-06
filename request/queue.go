@@ -2,19 +2,25 @@ package request
 
 import (
 	"fmt"
+	"io"
 	"sync"
 )
 
+type QueueResult struct {
+	Error   error
+	Request *Request
+}
+
 // Queue is a prioritized FIFO queue for requests
 type Queue interface {
+	io.Closer
 	// Enqueue adds the request to the queue, returns an error if no more space is available.
 	Enqueue(req *Request, priority int) error
 	// Dequeue pops the highest priority request from the queue.
-	// Returns an error if requests could not be dequeued.
-	Dequeue() (*Request, error)
-	Wait() <-chan *Request
+	Dequeue() <-chan QueueResult
 	// Count returns the amount of queued requests.
 	Count() (int, error)
+	Clear()
 }
 
 // QueueMaxSize signals the Queue has reached its maximum size.
@@ -51,17 +57,21 @@ type Heap struct {
 	maxSize        int
 	insertionCount int
 	lock           *sync.Mutex
-	fillCond       *sync.Cond
+	waitCondition  *sync.Cond
+	waitGroup      *sync.WaitGroup
+	isDone         bool
 }
 
 // NewHeap returns a request heap (priority queue).
 func NewHeap(maxSize int) *Heap {
 	lock := &sync.Mutex{}
 	heap := &Heap{
-		data:     make([]heapNode, maxSize/10),
-		maxSize:  maxSize,
-		lock:     lock,
-		fillCond: sync.NewCond(lock),
+		data:          make([]heapNode, maxSize/10),
+		maxSize:       maxSize,
+		lock:          lock,
+		waitCondition: sync.NewCond(lock),
+		waitGroup:     &sync.WaitGroup{},
+		isDone:        false,
 	}
 	return heap
 }
@@ -85,38 +95,48 @@ func (r *Heap) Enqueue(req *Request, priority int) error {
 	return r.insert(req, priority)
 }
 
-// Dequeue a request.
-func (r *Heap) Dequeue() (*Request, error) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-
-	if r.count > 0 {
-		return r.extract(), nil
-	}
-	return nil, nil
-}
-
-func (r *Heap) Wait() <-chan *Request {
-	outlet := make(chan *Request)
+func (r *Heap) Dequeue() <-chan QueueResult {
+	outlet := make(chan QueueResult)
 	go func() {
-		r.fillCond.L.Lock()
-		for r.count < 1 {
-			r.fillCond.Wait()
+		r.waitGroup.Add(1)
+		r.waitCondition.L.Lock()
+
+		// wait untl an item is available or Close is called
+		for r.count < 1 && !r.isDone {
+			r.waitCondition.Wait()
 		}
-		req := r.extract()
-		r.fillCond.L.Unlock()
-		outlet <- req
+
+		if r.isDone {
+			r.waitCondition.L.Unlock()
+		} else {
+			req := r.extract()
+			r.waitCondition.L.Unlock()
+			outlet <- QueueResult{
+				Request: req,
+			}
+
+		}
+
+		r.waitGroup.Done()
 	}()
+
 	return outlet
 }
 
-// Peek returns the next request without removing it from the queue.
-func (r *Heap) Peek() *Request {
-	return r.data[0].request
+func (r *Heap) Close() error {
+	r.isDone = true
+	r.waitCondition.Broadcast()
+	r.waitGroup.Wait()
+	return nil
+}
+
+func (r *Heap) Clear() {
+	for i := range r.data {
+		r.data[i] = heapNode{}
+	}
 }
 
 // Count returns the amount of requests in the queue.
-// Returns nil when no requests are in the heap.
 func (r *Heap) Count() (int, error) {
 	return r.count, nil
 }
@@ -154,7 +174,7 @@ func (r *Heap) insert(req *Request, priority int) error {
 
 	r.count++
 	r.insertionCount++
-	r.fillCond.Signal()
+	r.waitCondition.Signal()
 
 	return nil
 }

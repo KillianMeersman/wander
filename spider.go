@@ -230,6 +230,7 @@ func (s *Spider) Stop(ctx context.Context) *SpiderState {
 		s.ingestorWg.Wait()
 		close(done)
 	}()
+	s.queue.Close()
 
 	// Wait for the ingestors to stop or the context to cancel.
 	select {
@@ -264,7 +265,7 @@ func (s *Spider) filterRequestDomain(request *request.Request) bool {
 // getResponse waits for throttles and makes a GET request.
 func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 	if req == nil {
-		panic("ohno")
+		panic("Wander request is nil")
 	}
 	s.throttle.Wait(req)
 
@@ -323,9 +324,14 @@ func (s *Spider) spawn(n int) {
 				case <-s.done:
 					s.ingestorWg.Done()
 					return
-				case req := <-s.queue.Wait():
-					s.requestFunc(req)
-					res, err := s.getResponse(req)
+				case req := <-s.queue.Dequeue():
+					if req.Error != nil {
+						s.errorFunc(req.Error)
+						return
+					}
+
+					s.requestFunc(req.Request)
+					res, err := s.getResponse(req.Request)
 					if err != nil {
 						s.errorFunc(err)
 						return
