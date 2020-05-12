@@ -32,8 +32,8 @@ type RobotLimitFunction func(spid *Spider, req *request.Request) error
 // SpiderState holds a spider's state, such as the request queue and cache.
 // It is returned by the Start and Resume methods, allowing the Resume method to resume a previously stopped crawl.
 type SpiderState struct {
-	queue request.Queue
-	cache request.Cache
+	Queue request.Queue
+	Cache request.Cache
 }
 
 // Spider provides a parallelized scraper.
@@ -230,7 +230,7 @@ func (s *Spider) Stop(ctx context.Context) *SpiderState {
 		s.ingestorWg.Wait()
 		close(done)
 	}()
-	s.queue.Close()
+	s.Queue.Close()
 
 	// Wait for the ingestors to stop or the context to cancel.
 	select {
@@ -295,10 +295,10 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 	}
 
 	// check cache to prevent URL revisit
-	if s.cache.VisitedURL(req) {
+	if s.Cache.VisitedURL(req) {
 		return AlreadyVisited{req.URL}
 	}
-	s.cache.AddRequest(req)
+	s.Cache.AddRequest(req)
 
 	// check robots.txt
 	err := s.RobotExclusionFunction(s, req)
@@ -306,7 +306,7 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 		return err
 	}
 
-	err = s.queue.Enqueue(req, priority)
+	err = s.Queue.Enqueue(req, priority)
 	if err != nil {
 		return err
 	}
@@ -324,7 +324,7 @@ func (s *Spider) spawn(n int) {
 				case <-s.done:
 					s.ingestorWg.Done()
 					return
-				case req := <-s.queue.Dequeue():
+				case req := <-s.Queue.Dequeue():
 					if req.Error != nil {
 						s.errorFunc(req.Error)
 						return

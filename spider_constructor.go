@@ -43,11 +43,11 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 		}
 	}
 
-	if spider.queue == nil {
-		spider.queue = request.NewHeap(10000)
+	if spider.Queue == nil {
+		spider.Queue = request.NewHeap(10000)
 	}
-	if spider.cache == nil {
-		spider.cache = request.NewCache()
+	if spider.Cache == nil {
+		spider.Cache = request.NewCache()
 	}
 	if spider.RobotLimits == nil {
 		spider.RobotLimits = robots.NewRobotRules()
@@ -100,7 +100,7 @@ func MaxDepth(max int) SpiderConstructorOption {
 // Allows request queues to be shared between spiders.
 func Queue(queue request.Queue) SpiderConstructorOption {
 	return func(s *Spider) error {
-		s.queue = queue
+		s.Queue = queue
 		return nil
 	}
 }
@@ -109,7 +109,7 @@ func Queue(queue request.Queue) SpiderConstructorOption {
 // Allows request caches to be shared between spiders.
 func Cache(cache request.Cache) SpiderConstructorOption {
 	return func(s *Spider) error {
-		s.cache = cache
+		s.Cache = cache
 		return nil
 	}
 }
