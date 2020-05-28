@@ -3,7 +3,6 @@ package wander
 import (
 	"net/http"
 	"net/url"
-	"regexp"
 	"sync"
 
 	"github.com/KillianMeersman/wander/limits"
@@ -17,7 +16,7 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 	lock := &sync.Mutex{}
 	spider := &Spider{
 		SpiderState:    SpiderState{},
-		allowedDomains: make([]*regexp.Regexp, 0),
+		allowedDomains: make([]string, 0),
 		limits:         make(map[string]limits.RequestFilter),
 
 		ingestorN: 1,

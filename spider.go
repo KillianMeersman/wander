@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sync"
 
 	"github.com/KillianMeersman/wander/limits/robots"
@@ -39,7 +38,7 @@ type SpiderState struct {
 // Spider provides a parallelized scraper.
 type Spider struct {
 	SpiderState
-	allowedDomains []*regexp.Regexp
+	allowedDomains []string
 	RobotLimits    *robots.RobotRules
 	limits         map[string]limits.RequestFilter
 	throttle       limits.ThrottleCollection
@@ -100,17 +99,9 @@ func (s *Spider) SetProxyFunc(proxyFunc func(r *http.Request) (*url.URL, error))
 	}
 }
 
-// SetAllowedDomains sets the allowed domain regexs.
+// SetAllowedDomains sets the allowed domains.
 func (s *Spider) SetAllowedDomains(paths ...string) error {
-	regexs := make([]*regexp.Regexp, len(paths))
-	for i, path := range paths {
-		regex, err := regexp.Compile(path)
-		if err != nil {
-			return err
-		}
-		regexs[i] = regex
-	}
-	s.allowedDomains = regexs
+	s.allowedDomains = paths
 	return nil
 }
 
@@ -255,7 +246,7 @@ func (s *Spider) Wait() {
 // filterRequestDomain returns true if the spider is allowed to visit the domain.
 func (s *Spider) filterRequestDomain(request *request.Request) bool {
 	for _, domain := range s.allowedDomains {
-		if domain.MatchString(request.Host) {
+		if robots.MatchURLRule(domain, request.Host) {
 			return true
 		}
 	}
