@@ -21,8 +21,10 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 
 		ingestorN: 1,
 
-		client:                 &http.Client{},
-		UserAgent:              "WanderBot",
+		client: &http.Client{},
+		UserAgent: func(req *request.Request) string {
+			return "wander"
+		},
 		RobotExclusionFunction: FollowRobotRules,
 
 		ingestorWg: &sync.WaitGroup{},
@@ -130,9 +132,9 @@ func IgnoreRobots() SpiderConstructorOption {
 }
 
 // UserAgent set the spider User-agent.
-func UserAgent(agent string) SpiderConstructorOption {
+func UserAgent(agentFunction UserAgentFunction) SpiderConstructorOption {
 	return func(s *Spider) error {
-		s.UserAgent = agent
+		s.UserAgent = agentFunction
 		return nil
 	}
 }

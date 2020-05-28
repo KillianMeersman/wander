@@ -28,6 +28,9 @@ type SpiderConstructorOption func(s *Spider) error
 // It's possible to define your own RobotLimitFunction in order to e.a. ignore only certain limitations.
 type RobotLimitFunction func(spid *Spider, req *request.Request) error
 
+// UserAgentFunction determines what User-Agent the spider will use.
+type UserAgentFunction func(req *request.Request) string
+
 // SpiderState holds a spider's state, such as the request queue and cache.
 // It is returned by the Start and Resume methods, allowing the Resume method to resume a previously stopped crawl.
 type SpiderState struct {
@@ -64,7 +67,7 @@ type Spider struct {
 	client *http.Client
 
 	// options
-	UserAgent              string
+	UserAgent              UserAgentFunction
 	RobotExclusionFunction RobotLimitFunction
 }
 
@@ -383,12 +386,12 @@ func FollowRobotRules(s *Spider, req *request.Request) error {
 	}
 
 	// check if the rules allow this request
-	if !rules.Allowed(s.UserAgent, req.Path) {
+	if !rules.Allowed(s.UserAgent(req), req.Path) {
 		return robots.RobotDenied{req.URL}
 	}
 
 	// check crawl-delay
-	delay := rules.GetDelay(s.UserAgent, -1)
+	delay := rules.GetDelay(s.UserAgent(req), -1)
 	if delay > -1 {
 		// override spider throttle for this domain with the given crawl delay
 		s.throttle.SetDomainThrottle(limits.NewDomainThrottle(req.Host, delay))
