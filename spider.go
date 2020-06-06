@@ -268,7 +268,7 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 		return nil, err
 	}
 
-	doc, err := request.NewResponse(req, res)
+	doc := request.NewResponse(req, *res)
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +324,7 @@ func (s *Spider) spawn(n int) {
 						return
 					}
 
+					// Run the request callback and execute the request.
 					s.requestFunc(req.Request)
 					res, err := s.getResponse(req.Request)
 					if err != nil {
@@ -331,11 +332,21 @@ func (s *Spider) spawn(n int) {
 						return
 					}
 					s.responseFunc(res)
-					for selector, pipeline := range s.selectors {
-						res.Find(selector).Each(func(i int, el *goquery.Selection) {
-							pipeline(res, el)
-						})
+
+					// If there are selectors, parse the document and run the selector callbacks.
+					if len(s.selectors) > 0 {
+						_, err := res.Parse()
+						if err != nil {
+							s.errorFunc(err)
+							continue
+						}
+						for selector, pipeline := range s.selectors {
+							res.Document.Find(selector).Each(func(i int, el *goquery.Selection) {
+								pipeline(res, el)
+							})
+						}
 					}
+
 					s.pipelineDoneFunc()
 				}
 
