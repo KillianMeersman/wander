@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/KillianMeersman/wander"
+	"github.com/KillianMeersman/wander/limits"
 	"github.com/KillianMeersman/wander/request"
 	"github.com/KillianMeersman/wander/util"
 	"github.com/PuerkitoBio/goquery"
@@ -110,6 +111,7 @@ func TestSyncVisit(t *testing.T) {
 		wander.AllowedDomains("127.0.0.1", "localhost"),
 		wander.Threads(6),
 		wander.Queue(queue),
+		wander.Throttle(limits.NewDefaultThrottle(time.Second)),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -119,6 +121,10 @@ func TestSyncVisit(t *testing.T) {
 		Scheme: "http",
 		Host:   "localhost:8080",
 		Path:   "/test",
+	}
+	_, err = spid.VisitNow(url)
+	if err != nil {
+		t.Fatal(err)
 	}
 	_, err = spid.VisitNow(url)
 	if err != nil {

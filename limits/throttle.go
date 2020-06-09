@@ -87,7 +87,7 @@ func NewDefaultThrottle(delay time.Duration) *DefaultThrottle {
 	return &DefaultThrottle{
 		delay,
 		time.NewTicker(delay),
-		time.After(0),
+		nil,
 	}
 }
 
@@ -98,7 +98,10 @@ func (t *DefaultThrottle) Applies(_ *request.Request) bool {
 
 // Wait for the throttle
 func (t *DefaultThrottle) Wait(_ *request.Request) {
-	<-t.waitChannel
+	if t.waitChannel != nil {
+		<-t.waitChannel
+		t.waitChannel = nil
+	}
 	<-t.ticker.C
 }
 
