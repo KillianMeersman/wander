@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/KillianMeersman/wander/limits/robots"
 	"github.com/KillianMeersman/wander/util"
@@ -38,17 +39,30 @@ type SpiderState struct {
 	Cache request.Cache
 }
 
+// SpiderParameters crawling parameters for a spider
+type SpiderParameters struct {
+	UserAgent              UserAgentFunction
+	RobotExclusionFunction RobotLimitFunction
+	// DefaultWaitTime for 429 & 503 responses without a Retry-After header
+	DefaultWaitTime time.Duration
+	// MaxWaitTime for 429 & 503 responses with a Retry-After header
+	MaxWaitTime time.Duration
+	// IgnoreTimeouts if true, the bot will ignore 429 response timeouts.
+	// Defaults to false.
+	IgnoreTimeouts bool
+}
+
 // Spider provides a parallelized scraper.
 type Spider struct {
 	SpiderState
-	allowedDomains []string
+	SpiderParameters
 	RobotLimits    *robots.RobotRules
+	AllowedDomains []string
 	limits         map[string]limits.RequestFilter
 	throttle       limits.ThrottleCollection
 
 	// parallelism
 	ingestorN int
-	pipelineN int
 
 	done       chan struct{}
 	ingestorWg *sync.WaitGroup
@@ -65,10 +79,6 @@ type Spider struct {
 
 	// http
 	client *http.Client
-
-	// options
-	UserAgent              UserAgentFunction
-	RobotExclusionFunction RobotLimitFunction
 }
 
 /*
@@ -104,7 +114,7 @@ func (s *Spider) SetProxyFunc(proxyFunc func(r *http.Request) (*url.URL, error))
 
 // SetAllowedDomains sets the allowed domains.
 func (s *Spider) SetAllowedDomains(paths ...string) error {
-	s.allowedDomains = paths
+	s.AllowedDomains = paths
 	return nil
 }
 
@@ -146,8 +156,8 @@ func (s *Spider) OnPipelineFinished(f func()) {
 */
 // Visit adds a request with the given path to the queue with maximum priority. Blocks when the queue is full until there is free space.
 // This method is meant to be used solely for setting the starting points of crawls before calling Start.
-func (s *Spider) Visit(path string) error {
-	req, err := request.NewRequest(path, nil)
+func (s *Spider) Visit(url *url.URL) error {
+	req, err := request.NewRequest(url, nil)
 	if err != nil {
 		return err
 	}
@@ -157,8 +167,8 @@ func (s *Spider) Visit(path string) error {
 
 // VisitNow visits the given url without adding it to the queue.
 // It will still wait for any throttling.
-func (s *Spider) VisitNow(path string) (*request.Response, error) {
-	req, err := request.NewRequest(path, nil)
+func (s *Spider) VisitNow(url *url.URL) (*request.Response, error) {
+	req, err := request.NewRequest(url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -168,8 +178,8 @@ func (s *Spider) VisitNow(path string) (*request.Response, error) {
 
 // Follow a link by adding the path to the queue, blocks when the queue is full until there is free space.
 // Unlike Visit, this method also accepts a response, allowing the url parser to convert relative urls into absolute ones and keep track of depth.
-func (s *Spider) Follow(path string, res *request.Response, priority int) error {
-	req, err := request.NewRequest(path, res.Request)
+func (s *Spider) Follow(url *url.URL, res *request.Response, priority int) error {
+	req, err := request.NewRequest(url, res.Request)
 	if err != nil {
 		return err
 	}
@@ -248,7 +258,7 @@ func (s *Spider) Wait() {
 
 // filterRequestDomain returns true if the spider is allowed to visit the domain.
 func (s *Spider) filterRequestDomain(request *request.Request) bool {
-	for _, domain := range s.allowedDomains {
+	for _, domain := range s.AllowedDomains {
 		if robots.MatchURLRule(domain, request.Host) {
 			return true
 		}
@@ -331,6 +341,8 @@ func (s *Spider) spawn(n int) {
 						s.errorFunc(err)
 						return
 					}
+
+					s.CheckResponseStatus(res)
 					s.responseFunc(res)
 
 					// If there are selectors, parse the document and run the selector callbacks.
@@ -358,8 +370,12 @@ func (s *Spider) spawn(n int) {
 // DownloadRobotLimits downloads and parses the robots.txt file for a domain.
 // Respects the spider throttles.
 func (s *Spider) DownloadRobotLimits(req *request.Request) (*robots.RobotFile, error) {
-	s.throttle.Wait(req)
-	res, err := s.client.Get(fmt.Sprintf("%s://%s/robots.txt", req.Scheme, req.Host))
+	url := &url.URL{
+		Scheme: req.Scheme,
+		Host:   req.Host,
+		Path:   "/robots.txt",
+	}
+	res, err := s.VisitNow(url)
 	if err != nil {
 		return nil, err
 	}
@@ -373,6 +389,31 @@ func (s *Spider) DownloadRobotLimits(req *request.Request) (*robots.RobotFile, e
 		}
 	}
 	return domainLimits, nil
+}
+
+// CheckResponseStatus checks the response for any non-standard status codes.
+// It will apply additional throttling when it encounters a 429 or 503 status code, according to the spider parameters.
+func (s *Spider) CheckResponseStatus(res *request.Response) {
+	if !s.IgnoreTimeouts && (res.StatusCode == 429 || res.StatusCode == 503) {
+		retryAfter := res.Header.Get("Retry-After")
+		if len(retryAfter) > 0 {
+			// Parse Retry-Duration as RFC1123 timestamp
+			retryTime, err := time.Parse(time.RFC1123, retryAfter)
+			if err != nil {
+				// Parse Retry-Duration as seconds
+				retryAfterDuration, err := time.ParseDuration(fmt.Sprintf("%ss", retryAfter))
+				if err != nil {
+
+				}
+				retryTime = time.Now().Add(retryAfterDuration)
+			}
+			waitDuration := retryTime.Sub(time.Now())
+			s.throttle.SetWaitTime(waitDuration)
+		} else {
+			// No Retry-After header, use the default wait time
+			s.throttle.SetWaitTime(s.DefaultWaitTime)
+		}
+	}
 }
 
 /*

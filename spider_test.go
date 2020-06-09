@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sync"
 	"testing"
@@ -45,6 +46,7 @@ func (h *regexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func randomLinkServer() *http.Server {
+
 	randomLinks := func(w http.ResponseWriter, r *http.Request) {
 		msg := []byte(fmt.Sprintf(`
 		<html>
@@ -58,6 +60,7 @@ func randomLinkServer() *http.Server {
 		</html>`, util.RandomString(20), util.RandomString(20), util.RandomString(20)))
 
 		w.Write(msg)
+
 	}
 
 	robots := func(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +114,13 @@ func TestSyncVisit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = spid.VisitNow("http://localhost:8080/test/")
+
+	url := &url.URL{
+		Scheme: "http",
+		Host:   "localhost:8080",
+		Path:   "/test",
+	}
+	_, err = spid.VisitNow(url)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,8 +173,13 @@ func benchmarkSpider(b *testing.B, queue request.Queue) {
 
 	spid.OnHTML("a[href]", func(res *request.Response, el *goquery.Selection) {
 		link, ok := el.Attr("href")
+		url, err := url.Parse(link)
+		if err != nil {
+			return
+		}
+
 		if ok {
-			err := spid.Follow(link, res, 10-res.Request.Depth)
+			err := spid.Follow(url, res, 10-res.Request.Depth)
 			if err != nil {
 				switch err.(type) {
 				case *request.QueueMaxSize:
@@ -185,7 +199,13 @@ func benchmarkSpider(b *testing.B, queue request.Queue) {
 	})
 
 	b.ResetTimer()
-	err = spid.Visit("http://localhost:8080/test/")
+
+	url := &url.URL{
+		Scheme: "http",
+		Host:   "localhost:8080",
+		Path:   "/test",
+	}
+	err = spid.Visit(url)
 	if err != nil {
 		log.Fatal(err)
 	}

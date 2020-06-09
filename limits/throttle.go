@@ -8,8 +8,12 @@ import (
 
 // Throttle is used to limit the rate of requests.
 type Throttle interface {
+	// Wait for the throttle.
 	Wait(*request.Request)
+	// Applies returns true if the throttle applies to a request.
 	Applies(*request.Request) bool
+	// SetWaitTime add a wait time and return the total wait time.
+	SetWaitTime(time.Duration)
 }
 
 // ThrottleCollection combines a default and domain specific throttles.
@@ -55,6 +59,16 @@ func (t *ThrottleCollection) Applies(_ *request.Request) bool {
 	return true
 }
 
+// SetWaitTime make all throttles block for a duration.
+func (t *ThrottleCollection) SetWaitTime(waitTime time.Duration) {
+	if t.defaultThrottle != nil {
+		t.defaultThrottle.SetWaitTime(waitTime)
+	}
+	for _, domainThrottle := range t.domainThrottles {
+		domainThrottle.SetWaitTime(waitTime)
+	}
+}
+
 // SetDomainThrottle sets a domain throttle.
 // Will overwrite existing domain throttle if it already exists.
 func (t *ThrottleCollection) SetDomainThrottle(throttle *DomainThrottle) {
@@ -63,8 +77,9 @@ func (t *ThrottleCollection) SetDomainThrottle(throttle *DomainThrottle) {
 
 // DefaultThrottle will throttle all domains
 type DefaultThrottle struct {
-	interval time.Duration
-	ticker   *time.Ticker
+	interval    time.Duration
+	ticker      *time.Ticker
+	waitChannel <-chan time.Time
 }
 
 // NewDefaultThrottle will throttle all domains
@@ -72,6 +87,7 @@ func NewDefaultThrottle(delay time.Duration) *DefaultThrottle {
 	return &DefaultThrottle{
 		delay,
 		time.NewTicker(delay),
+		time.After(0),
 	}
 }
 
@@ -82,7 +98,12 @@ func (t *DefaultThrottle) Applies(_ *request.Request) bool {
 
 // Wait for the throttle
 func (t *DefaultThrottle) Wait(_ *request.Request) {
+	<-t.waitChannel
 	<-t.ticker.C
+}
+
+func (t *DefaultThrottle) SetWaitTime(waitTime time.Duration) {
+	t.waitChannel = time.After(waitTime)
 }
 
 // DomainThrottle will throttle a specific domain.
@@ -104,4 +125,8 @@ func NewDomainThrottle(domain string, delay time.Duration) *DomainThrottle {
 // Applies returns true if the path matches the Throttle domain.
 func (t *DomainThrottle) Applies(req *request.Request) bool {
 	return t.domain == req.Host
+}
+
+func (t *DomainThrottle) SetWaitTime(waitTime time.Duration) {
+	t.waitChannel = time.After(waitTime)
 }

@@ -1,7 +1,7 @@
 package request_test
 
 import (
-	"fmt"
+	"net/url"
 	"testing"
 
 	"github.com/KillianMeersman/wander/request"
@@ -12,7 +12,11 @@ func randomRequests(n int) ([]*request.Request, error) {
 	requests := make([]*request.Request, n)
 	var parent *request.Request = nil
 	for i := 0; i < n; i++ {
-		req, err := request.NewRequest(fmt.Sprintf("http://%s", util.RandomString(50)), parent)
+		url := &url.URL{
+			Scheme: "http",
+			Host:   util.RandomString(50),
+		}
+		req, err := request.NewRequest(url, parent)
 		if err != nil {
 			return nil, err
 		}

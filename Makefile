@@ -4,6 +4,6 @@ test:
 	go test ./...
 
 benchmark:
-	go test -bench . -benchtime 5s
+	go test -bench . -benchmem ./...
 
 .PHONY: test benchmark

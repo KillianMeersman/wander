@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/KillianMeersman/wander/limits"
 	"github.com/KillianMeersman/wander/limits/robots"
@@ -14,18 +15,26 @@ import (
 // NewSpider instantiates a new spider.
 func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 	lock := &sync.Mutex{}
+
+	parameters := SpiderParameters{
+		UserAgent: func(req *request.Request) string {
+			return "wander<https://github.com/KillianMeersman/wander>"
+		},
+		RobotExclusionFunction: FollowRobotRules,
+		DefaultWaitTime:        30 * time.Second,
+		MaxWaitTime:            1 * time.Hour,
+		IgnoreTimeouts:         false,
+	}
+
 	spider := &Spider{
-		SpiderState:    SpiderState{},
-		allowedDomains: make([]string, 0),
-		limits:         make(map[string]limits.RequestFilter),
+		SpiderState:      SpiderState{},
+		SpiderParameters: parameters,
+		AllowedDomains:   make([]string, 0),
+		limits:           make(map[string]limits.RequestFilter),
 
 		ingestorN: 1,
 
 		client: &http.Client{},
-		UserAgent: func(req *request.Request) string {
-			return "wander"
-		},
-		RobotExclusionFunction: FollowRobotRules,
 
 		ingestorWg: &sync.WaitGroup{},
 		lock:       lock,
@@ -76,7 +85,6 @@ func Ingestors(n int) SpiderConstructorOption {
 func Threads(n int) SpiderConstructorOption {
 	return func(s *Spider) error {
 		s.ingestorN = n
-		s.pipelineN = n
 		return nil
 	}
 }
