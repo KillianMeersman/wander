@@ -39,7 +39,7 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 		ingestorWg: &sync.WaitGroup{},
 		lock:       lock,
 
-		requestFunc:      func(req *request.Request) {},
+		requestFunc:      func(req *request.Request) *request.Request { return req },
 		responseFunc:     func(res *request.Response) {},
 		errorFunc:        func(err error) {},
 		selectors:        make(map[string]func(*request.Response, *goquery.Selection)),

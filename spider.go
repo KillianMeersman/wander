@@ -71,7 +71,7 @@ type Spider struct {
 	isRunning bool
 
 	// callbacks
-	requestFunc      func(*request.Request)
+	requestFunc      func(*request.Request) *request.Request
 	responseFunc     func(*request.Response)
 	errorFunc        func(error)
 	selectors        map[string]func(*request.Response, *goquery.Selection)
@@ -123,8 +123,10 @@ func (s *Spider) SetAllowedDomains(paths ...string) error {
 */
 
 // OnRequest is called when a request is about to be made.
+// This function should return a request, allowing the callback to mutate the request.
+// If null is returned, no requests are made.
 // This will overwrite any previous callbacks set by this method.
-func (s *Spider) OnRequest(f func(req *request.Request)) {
+func (s *Spider) OnRequest(f func(req *request.Request) *request.Request) {
 	s.requestFunc = f
 }
 
@@ -335,8 +337,11 @@ func (s *Spider) spawn(n int) {
 					}
 
 					// Run the request callback and execute the request.
-					s.requestFunc(req.Request)
-					res, err := s.getResponse(req.Request)
+					newRequest := s.requestFunc(req.Request)
+					if newRequest == nil {
+						continue
+					}
+					res, err := s.getResponse(newRequest)
 					if err != nil {
 						s.errorFunc(err)
 						return

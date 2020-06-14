@@ -200,8 +200,9 @@ func benchmarkSpider(b *testing.B, queue request.Queue) {
 		b.Fatal(err)
 	})
 
-	spid.OnRequest(func(req *request.Request) {
+	spid.OnRequest(func(req *request.Request) *request.Request {
 		reqn++
+		return req
 	})
 
 	b.ResetTimer()
