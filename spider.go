@@ -301,13 +301,17 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 	}
 
 	// check cache to prevent URL revisit
-	if s.Cache.VisitedURL(req) {
+	visited, err := s.Cache.VisitedURL(req)
+	if err != nil {
+		return err
+	}
+	if visited {
 		return AlreadyVisited{req.URL}
 	}
 	s.Cache.AddRequest(req)
 
 	// check robots.txt
-	err := s.RobotExclusionFunction(s, req)
+	err = s.RobotExclusionFunction(s, req)
 	if err != nil {
 		return err
 	}

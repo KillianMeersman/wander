@@ -31,7 +31,7 @@ func NewRedisQueue(host string, port int, password, key string, db int) (*RedisQ
 
 	return &RedisQueue{
 		client:    client,
-		key:       "requests",
+		key:       key,
 		isDone:    false,
 		waitGroup: &sync.WaitGroup{},
 	}, nil

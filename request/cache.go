@@ -6,8 +6,9 @@ import (
 
 // Cache holds visited urls to prevent revisitation
 type Cache interface {
-	AddRequest(req *Request)
-	VisitedURL(req *Request) bool
+	AddRequest(req *Request) error
+	VisitedURL(req *Request) (bool, error)
+	Clear() error
 }
 
 // LocalCache holds urls in maps. Safe for use by multiple goroutines.
@@ -24,18 +25,24 @@ func NewCache() *LocalCache {
 }
 
 // AddRequest adds a request url to the cache.
-func (c *LocalCache) AddRequest(req *Request) {
+func (c *LocalCache) AddRequest(req *Request) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	c.requests[req.URL.String()] = struct{}{}
+	return nil
 }
 
 // VisitedURL returns true if the request url has been visited before.
-func (c *LocalCache) VisitedURL(req *Request) bool {
+func (c *LocalCache) VisitedURL(req *Request) (bool, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
 	_, ok := c.requests[req.URL.String()]
-	return ok
+	return ok, nil
+}
+
+func (c *LocalCache) Clear() error {
+	c.requests = make(map[string]struct{})
+	return nil
 }
