@@ -2,8 +2,10 @@ package robots
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -54,7 +56,7 @@ func (c *RobotRules) AddLimits(in io.Reader, host string) (*RobotFile, error) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	limits, err := FromReader(in)
+	limits, err := NewRobotFileFromReader(in)
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +78,20 @@ func newRobotFile() *RobotFile {
 	}
 }
 
-// FromReader will parse a robot exclusion file from an io.Reader.
+func NewRobotFileFromURL(url string, client http.RoundTripper) (*RobotFile, error) {
+	request, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.RoundTrip(request)
+	defer res.Body.Close()
+
+	return NewRobotFileFromReader(res.Body)
+}
+
+// RobotFileFromReader will parse a robot exclusion file from an io.Reader.
 // Returns a default error if it encounters an invalid directive.
-func FromReader(in io.Reader) (*RobotFile, error) {
+func NewRobotFileFromReader(in io.Reader) (*RobotFile, error) {
 	scanner := bufio.NewScanner(in)
 	limits := newRobotFile()
 
@@ -191,9 +204,13 @@ func (l *RobotFile) GetDelay(userAgent string, defaultDelay time.Duration) time.
 }
 
 // Sitemap returns the URL to the sitemap for the given User-agent.
-// Returns the default sitemap if not User-agent specific sitemap was specified, otherwise nil.
-func (l *RobotFile) Sitemap(userAgent string) *url.URL {
-	return l.sitemap
+// Returns the default sitemap if no User-agent specific sitemap was specified, otherwise nil.
+func (l *RobotFile) Sitemap(userAgent string, client http.RoundTripper) (*Sitemap, error) {
+	if l.sitemap == nil {
+		return nil, errors.New("No sitemap in robots.txt")
+	}
+
+	return NewSitemapFromURL(l.sitemap.String(), client)
 }
 
 // UserAgentRules holds limits for a single user agent.

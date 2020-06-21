@@ -28,7 +28,7 @@ Disallow: /
 func TestRobotLimits(t *testing.T) {
 	reader := strings.NewReader(robotsTxt)
 
-	limits, err := robots.FromReader(reader)
+	limits, err := robots.NewRobotFileFromReader(reader)
 	if err != nil {
 		t.Fatal(err)
 	}
