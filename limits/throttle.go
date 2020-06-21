@@ -1,17 +1,16 @@
 package limits
 
 import (
+	"net/http"
 	"time"
-
-	"github.com/KillianMeersman/wander/request"
 )
 
 // Throttle is used to limit the rate of requests.
 type Throttle interface {
 	// Wait for the throttle.
-	Wait(*request.Request)
+	Wait(*http.Request)
 	// Applies returns true if the throttle applies to a request.
-	Applies(*request.Request) bool
+	Applies(*http.Request) bool
 	// SetWaitTime add a wait time and return the total wait time.
 	SetWaitTime(time.Duration)
 }
@@ -35,8 +34,8 @@ func NewThrottleCollection(defaultThrottle *DefaultThrottle, domainThrottles ...
 	return col
 }
 
-func (t *ThrottleCollection) getThrottle(req *request.Request) Throttle {
-	throttle, ok := t.domainThrottles[req.Host]
+func (t *ThrottleCollection) getThrottle(req *http.Request) Throttle {
+	throttle, ok := t.domainThrottles[req.URL.Host]
 	if ok {
 		return throttle
 	}
@@ -47,7 +46,7 @@ func (t *ThrottleCollection) getThrottle(req *request.Request) Throttle {
 }
 
 // Wait blocks until the most approprate timer has ticked over.
-func (t *ThrottleCollection) Wait(req *request.Request) {
+func (t *ThrottleCollection) Wait(req *http.Request) {
 	throttle := t.getThrottle(req)
 	if throttle != nil {
 		throttle.Wait(req)
@@ -55,7 +54,7 @@ func (t *ThrottleCollection) Wait(req *request.Request) {
 }
 
 // Applies returns true if the path matches the Throttle domain regex
-func (t *ThrottleCollection) Applies(_ *request.Request) bool {
+func (t *ThrottleCollection) Applies(_ *http.Request) bool {
 	return true
 }
 
@@ -92,12 +91,12 @@ func NewDefaultThrottle(delay time.Duration) *DefaultThrottle {
 }
 
 // Applies returns true if the path matches the Throttle domain regex
-func (t *DefaultThrottle) Applies(_ *request.Request) bool {
+func (t *DefaultThrottle) Applies(_ *http.Request) bool {
 	return true
 }
 
 // Wait for the throttle
-func (t *DefaultThrottle) Wait(_ *request.Request) {
+func (t *DefaultThrottle) Wait(_ *http.Request) {
 	if t.waitChannel != nil {
 		<-t.waitChannel
 		t.waitChannel = nil
@@ -126,8 +125,8 @@ func NewDomainThrottle(domain string, delay time.Duration) *DomainThrottle {
 }
 
 // Applies returns true if the path matches the Throttle domain.
-func (t *DomainThrottle) Applies(req *request.Request) bool {
-	return t.domain == req.Host
+func (t *DomainThrottle) Applies(req *http.Request) bool {
+	return t.domain == req.URL.Host
 }
 
 func (t *DomainThrottle) SetWaitTime(waitTime time.Duration) {

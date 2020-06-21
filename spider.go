@@ -261,11 +261,18 @@ func (s *Spider) Wait() {
 // filterRequestDomain returns true if the spider is allowed to visit the domain.
 func (s *Spider) filterRequestDomain(request *request.Request) bool {
 	for _, domain := range s.AllowedDomains {
-		if robots.MatchURLRule(domain, request.Host) {
+		if robots.MatchURLRule(domain, request.URL.Host) {
 			return true
 		}
 	}
 	return false
+}
+
+// RoundTrip implements the http.RoundTripper interface.
+// It will wait for any throttles before making requests.
+func (s *Spider) RoundTrip(req *http.Request) (*http.Response, error) {
+	s.throttle.Wait(req)
+	return s.client.Get(req.URL.String())
 }
 
 // getResponse waits for throttles and makes a GET request.
@@ -273,9 +280,8 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 	if req == nil {
 		panic("Wander request is nil")
 	}
-	s.throttle.Wait(req)
 
-	res, err := s.client.Get(req.String())
+	res, err := s.RoundTrip(&req.Request)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +296,7 @@ func (s *Spider) getResponse(req *request.Request) (*request.Response, error) {
 // addRequest adds a request to the queue.
 func (s *Spider) addRequest(req *request.Request, priority int) error {
 	if !s.filterRequestDomain(req) {
-		return limits.ForbiddenDomain{req.URL}
+		return limits.ForbiddenDomain{*req.URL}
 	}
 
 	for _, limit := range s.limits {
@@ -306,7 +312,7 @@ func (s *Spider) addRequest(req *request.Request, priority int) error {
 		return err
 	}
 	if visited {
-		return AlreadyVisited{req.URL}
+		return AlreadyVisited{*req.URL}
 	}
 	s.Cache.AddRequest(req)
 
@@ -380,8 +386,8 @@ func (s *Spider) spawn(n int) {
 // Respects the spider throttles.
 func (s *Spider) DownloadRobotLimits(req *request.Request) (*robots.RobotFile, error) {
 	url := &url.URL{
-		Scheme: req.Scheme,
-		Host:   req.Host,
+		Scheme: req.URL.Scheme,
+		Host:   req.URL.Host,
 		Path:   "/robots.txt",
 	}
 	res, err := s.VisitNow(url)
@@ -393,7 +399,7 @@ func (s *Spider) DownloadRobotLimits(req *request.Request) (*robots.RobotFile, e
 	domainLimits, err := s.RobotLimits.AddLimits(res.Body, req.Host)
 	if err != nil {
 		return nil, robots.InvalidRobots{
-			Domain: req.Host,
+			Domain: req.URL.Host,
 			Err:    err.Error(),
 		}
 	}
@@ -438,7 +444,7 @@ func IgnoreRobotRules(s *Spider, req *request.Request) error {
 // FollowRobotRules fetches and follows the limitations imposed by the robots.txt file.
 // Implementation of RobotLimitFunction.
 func FollowRobotRules(s *Spider, req *request.Request) error {
-	rules, err := s.RobotLimits.GetRulesForHost(req.Host)
+	rules, err := s.RobotLimits.GetRulesForHost(req.URL.Host)
 	if err != nil {
 		rules, err = s.DownloadRobotLimits(req)
 		if err != nil {
@@ -447,15 +453,15 @@ func FollowRobotRules(s *Spider, req *request.Request) error {
 	}
 
 	// check if the rules allow this request
-	if !rules.Allowed(s.UserAgent(req), req.Path) {
-		return robots.RobotDenied{req.URL}
+	if !rules.Allowed(s.UserAgent(req), req.URL.Path) {
+		return robots.RobotDenied{*req.URL}
 	}
 
 	// check crawl-delay
 	delay := rules.GetDelay(s.UserAgent(req), -1)
 	if delay > -1 {
 		// override spider throttle for this domain with the given crawl delay
-		s.throttle.SetDomainThrottle(limits.NewDomainThrottle(req.Host, delay))
+		s.throttle.SetDomainThrottle(limits.NewDomainThrottle(req.URL.Host, delay))
 	}
 	return nil
 }

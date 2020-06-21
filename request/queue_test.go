@@ -144,7 +144,7 @@ func TestRequestRedisDifferentPriority(t *testing.T) {
 		if req.Error != nil {
 			t.Fatal(req.Error)
 		}
-		if *req.Request != *requests[i] {
+		if *req.Request.URL != *requests[i].URL {
 			t.Fatal("requests dequeued in incorrect order")
 		}
 	}

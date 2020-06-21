@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sync"
 	"testing"
@@ -102,13 +103,13 @@ func TestMain(m *testing.M) {
 	serv := randomLinkServer()
 	go serv.ListenAndServe()
 	defer serv.Shutdown(ctx)
-	m.Run()
+	os.Exit(m.Run())
 }
 
 func TestSyncVisit(t *testing.T) {
 	queue := request.NewHeap(10)
 	spid, err := wander.NewSpider(
-		wander.AllowedDomains("127.0.0.1", "localhost"),
+		wander.AllowedDomains("localhost:8080"),
 		wander.Threads(6),
 		wander.Queue(queue),
 		wander.Throttle(limits.NewDefaultThrottle(time.Second)),
@@ -150,7 +151,7 @@ func benchmarkSpider(b *testing.B, queue request.Queue) {
 	defer queue.Close()
 
 	spid, err := wander.NewSpider(
-		wander.AllowedDomains("127.0.0.1", "localhost"),
+		wander.AllowedDomains("localhost:8080"),
 		wander.Threads(6),
 		wander.Queue(queue),
 	)
