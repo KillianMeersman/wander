@@ -78,12 +78,15 @@ func newRobotFile() *RobotFile {
 	}
 }
 
-func NewRobotFileFromURL(url string, client http.RoundTripper) (*RobotFile, error) {
-	request, err := http.NewRequest("GET", url, nil)
+func NewRobotFileFromURL(url *url.URL, client http.RoundTripper) (*RobotFile, error) {
+	request, err := http.NewRequest("GET", url.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	res, err := client.RoundTrip(request)
+	if err != nil {
+		return nil, err
+	}
 	defer res.Body.Close()
 
 	return NewRobotFileFromReader(res.Body)
@@ -205,7 +208,7 @@ func (l *RobotFile) GetDelay(userAgent string, defaultDelay time.Duration) time.
 
 // Sitemap returns the URL to the sitemap for the given User-agent.
 // Returns the default sitemap if no User-agent specific sitemap was specified, otherwise nil.
-func (l *RobotFile) Sitemap(userAgent string, client http.RoundTripper) (*Sitemap, error) {
+func (l *RobotFile) GetSitemap(userAgent string, client http.RoundTripper) (*Sitemap, error) {
 	if l.sitemap == nil {
 		return nil, errors.New("No sitemap in robots.txt")
 	}

@@ -51,9 +51,9 @@ func NewSitemapFromURL(url string, client http.RoundTripper) (*Sitemap, error) {
 	return NewSitemapFromReader(res.Body)
 }
 
-// GetURLs gets up to <limit> sitemap locations.
+// GetLocations gets up to <limit> sitemap locations.
 // Sitemaps usually come in pages of 50k entries, this means the limit may be exceeded by up to 49_999 entries.
-func (s *Sitemap) GetURLs(client http.RoundTripper, limit int) ([]SitemapLocation, error) {
+func (s *Sitemap) GetLocations(client http.RoundTripper, limit int) ([]SitemapLocation, error) {
 	urls := s.URLSet
 
 	for _, index := range s.Index {
