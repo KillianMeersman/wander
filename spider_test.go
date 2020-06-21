@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sync"
 	"testing"
@@ -102,7 +103,7 @@ func TestMain(m *testing.M) {
 	serv := randomLinkServer()
 	go serv.ListenAndServe()
 	defer serv.Shutdown(ctx)
-	m.Run()
+	os.Exit(m.Run())
 }
 
 func TestSyncVisit(t *testing.T) {

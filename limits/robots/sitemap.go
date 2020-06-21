@@ -2,6 +2,7 @@ package robots
 
 import (
 	"encoding/xml"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"time"
@@ -26,16 +27,9 @@ func NewSitemap() *Sitemap {
 	}
 }
 
-func NewSitemapFromURL(url string, client http.RoundTripper) (*Sitemap, error) {
-	request, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	res, err := client.RoundTrip(request)
-	defer res.Body.Close()
-
+func NewSitemapFromReader(reader io.Reader) (*Sitemap, error) {
 	var sitemap Sitemap
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -45,6 +39,16 @@ func NewSitemapFromURL(url string, client http.RoundTripper) (*Sitemap, error) {
 	}
 
 	return &sitemap, nil
+}
+
+func NewSitemapFromURL(url string, client http.RoundTripper) (*Sitemap, error) {
+	request, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.RoundTrip(request)
+	defer res.Body.Close()
+	return NewSitemapFromReader(res.Body)
 }
 
 // GetURLs gets up to <limit> sitemap locations.

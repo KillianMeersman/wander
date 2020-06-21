@@ -1,34 +1,31 @@
 package robots_test
 
 import (
+	"os"
 	"testing"
-	"time"
 
-	"github.com/KillianMeersman/wander"
-	"github.com/KillianMeersman/wander/limits"
 	"github.com/KillianMeersman/wander/limits/robots"
 )
 
 func TestSitemapParsing(t *testing.T) {
-	spider, err := wander.NewSpider(wander.Throttle(limits.NewDefaultThrottle(1*time.Second)), wander.AllowedDomains("localhost:8080"))
+	indexFile, err := os.Open("index.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := robots.NewSitemapFromReader(indexFile)
+
+	if len(index.Index) < 1 {
+		t.Fatal("Index empty")
+	}
+
+	urlsetFile, err := os.Open("urlset.xml")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	robots, err := robots.NewRobotFileFromURL("https://bol.com/robots.txt", spider)
-	if err != nil {
-		t.Fatal(err)
-	}
+	index, err = robots.NewSitemapFromReader(urlsetFile)
 
-	sitemap, err := robots.Sitemap("wander", spider)
-	if err != nil {
-		t.Fatal(err)
+	if len(index.URLSet) < 1 {
+		t.Fatal("URLSet empty")
 	}
-
-	locations, err := sitemap.GetURLs(spider, 50000)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Log(len(locations))
 }
