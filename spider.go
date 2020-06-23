@@ -390,20 +390,12 @@ func (s *Spider) DownloadRobotLimits(req *request.Request) (*robots.RobotFile, e
 		Host:   req.URL.Host,
 		Path:   "/robots.txt",
 	}
-	res, err := s.VisitNow(url)
+	robotFile, err := robots.NewRobotFileFromURL(url, s)
 	if err != nil {
 		return nil, err
 	}
-
-	defer res.Body.Close()
-	domainLimits, err := s.RobotLimits.AddLimits(res.Body, req.Host)
-	if err != nil {
-		return nil, robots.InvalidRobots{
-			Domain: req.URL.Host,
-			Err:    err.Error(),
-		}
-	}
-	return domainLimits, nil
+	s.RobotLimits.AddLimits(robotFile, req.URL.Host)
+	return robotFile, nil
 }
 
 // CheckResponseStatus checks the response for any non-standard status codes.

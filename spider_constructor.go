@@ -54,7 +54,7 @@ func NewSpider(options ...SpiderConstructorOption) (*Spider, error) {
 	}
 
 	if spider.Queue == nil {
-		spider.Queue = request.NewHeap(10000)
+		spider.Queue = request.NewRequestHeap(10000)
 	}
 	if spider.Cache == nil {
 		spider.Cache = request.NewCache()
