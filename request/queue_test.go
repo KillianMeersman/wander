@@ -39,7 +39,7 @@ func BenchmarkRequestHeap(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	heap := request.NewHeap(n)
+	heap := request.NewRequestHeap(n)
 	defer heap.Close()
 	if err != nil {
 		b.Fatal(err)
@@ -59,7 +59,7 @@ func TestRequestHeapEqualPriority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	heap := request.NewHeap(10000)
+	heap := request.NewRequestHeap(10000)
 	defer heap.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestRequestHeapDifferentPriority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	heap := request.NewHeap(1001)
+	heap := request.NewRequestHeap(1001)
 	defer heap.Close()
 	if err != nil {
 		t.Fatal(err)

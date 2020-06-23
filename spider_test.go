@@ -107,7 +107,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestSyncVisit(t *testing.T) {
-	queue := request.NewHeap(10)
+	queue := request.NewRequestHeap(10)
 	spid, err := wander.NewSpider(
 		wander.AllowedDomains("localhost:8080"),
 		wander.Threads(6),
@@ -134,7 +134,7 @@ func TestSyncVisit(t *testing.T) {
 }
 
 func BenchmarkSpiderWithHeapQueue(b *testing.B) {
-	queue := request.NewHeap(10000)
+	queue := request.NewRequestHeap(10000)
 	benchmarkSpider(b, queue)
 }
 

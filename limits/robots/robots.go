@@ -51,18 +51,11 @@ func (c *RobotRules) GetRulesForHost(host string) (*RobotFile, error) {
 	return limits, nil
 }
 
-// AddLimits adds or replaces the limits for a host. Returns an error if the limits are invalid.
-func (c *RobotRules) AddLimits(in io.Reader, host string) (*RobotFile, error) {
+// AddLimits adds or replaces the limits for a host.
+func (c *RobotRules) AddLimits(robotFile *RobotFile, host string) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-
-	limits, err := NewRobotFileFromReader(in)
-	if err != nil {
-		return nil, err
-	}
-
-	c.hosts[host] = limits
-	return limits, nil
+	c.hosts[host] = robotFile
 }
 
 // RobotFile holds all the information in a robots exclusion file.
