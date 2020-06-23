@@ -31,6 +31,28 @@ func randomRequests(n int) ([]*request.Request, error) {
 	return requests, nil
 }
 
+func BenchmarkRequestHeap(b *testing.B) {
+	n := b.N
+
+	requests, err := randomRequests(n)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	heap := request.NewHeap(n)
+	defer heap.Close()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for i, req := range requests {
+		err := heap.Enqueue(req, n-i)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestRequestHeapEqualPriority(t *testing.T) {
 	requests, err := randomRequests(1000)
 	if err != nil {
